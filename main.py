@@ -1,3 +1,4 @@
+
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
@@ -107,7 +108,8 @@ def main():
                 elif "callback_query" in update:
                     query = update["callback_query"]
                     chat_id = query["message"]["chat"]["id"]
-                    data = query["data"]
+
+data = query["data"]  # تورفتگی درست شد
                     
                     if data == "status":
                         cursor.execute("SELECT coins, power, territory FROM players WHERE chat_id = ?", (chat_id,))
@@ -134,6 +136,5 @@ def main():
 
         time.sleep(1)
 
-if __name__ == "__main__":
+if name == "__main__":
     main()
-      
