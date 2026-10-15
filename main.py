@@ -4,6 +4,7 @@ import requests
 import json
 import random
 import sqlite3
+import time
 from flask import Flask, render_template_string, request, jsonify
 
 # --- راه‌اندازی سرور Flask برای وب‌اپ و سلامت سرور ---
@@ -248,9 +249,28 @@ def run_flask_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
-# اجرای وب‌سرور در یک ترد جداگانه
+def self_ping():
+    """پینگ خودکار هر ۱۰ دقیقه برای بیدار نگه داشتن سرور در رندر"""
+    time.sleep(15)  # کمی صبر می‌کنیم تا سرور بالا بیاید
+    app_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not app_url:
+        return
+    health_url = f"{app_url}/health"
+    
+    while True:
+        try:
+            time.sleep(600)  # هر ۶۰۰ ثانیه (۱۰ دقیقه)
+            requests.get(health_url, timeout=10)
+            print("Self-ping sent successfully.")
+        except Exception as e:
+            print(f"Self-ping error: {e}")
+
+# اجرای وب‌سرور و پینگ خودکار در تردهای جداگانه
 web_thread = threading.Thread(target=run_flask_server, daemon=True)
 web_thread.start()
+
+ping_thread = threading.Thread(target=self_ping, daemon=True)
+ping_thread.start()
 # ---------------------------------------------------------------------
 
 TOKEN = os.environ.get("TOKEN")
@@ -321,7 +341,6 @@ def main():
                         )
                         send_message(chat_id, welcome_text, keyboard)
 
-        import time
         time.sleep(1)
 
 if __name__ == "__main__":
