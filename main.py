@@ -1,4 +1,3 @@
-
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
@@ -8,23 +7,31 @@ import time
 import random
 import sqlite3
 
-# --- بخش اول: سرور وب کوچک برای فریب دادن رندر (جلوگیری از خطای پورت) ---
+# --- بخش اول: سرور وب کوچک برای فریب دادن رندر (جلوگیری از خطای پورت و نگه داشتن ربات) ---
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is alive and running!")
 
+    def log_message(self, format, *args):
+        # این خط باعث میشه لاگ‌های اضافی سرور وب، لاگ‌های اصلی رباتت رو شلوغ نکنه
+        return
+
 def run_web_server():
+    # رندر پورت رو از طریق متغیر محیطی میگه، اگر نبود از 10000 استفاده کن
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+    print(f"Web server starting on port {port}...")
     server.serve_forever()
 
-# اجرای سرور وب در پس‌زمینه
-threading.Thread(target=run_web_server, daemon=True).start()
+# اجرای سرور وب در پس‌زمینه به محض شروع برنامه
+web_thread = threading.Thread(target=run_web_server, daemon=True)
+web_thread.start()
 # ---------------------------------------------------------------------
 
 # تنظیمات ربات بله
+# حتماً در پنل رندر در قسمت Environment Variables، متغیر TOKEN رو تعریف کن
 TOKEN = os.environ.get("TOKEN")
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 
@@ -108,14 +115,15 @@ def main():
                 elif "callback_query" in update:
                     query = update["callback_query"]
                     chat_id = query["message"]["chat"]["id"]
-
-data = query["data"]  # تورفتگی درست شد
+                    data = query["data"]
                     
                     if data == "status":
                         cursor.execute("SELECT coins, power, territory FROM players WHERE chat_id = ?", (chat_id,))
-                        coins, power, territory = cursor.fetchone()
-                        status_text = f"🏰 قلمرو: {territory}\n💰 سکه‌ها: {coins}\n⚡ قدرت جنگی: {power}"
-                        send_message(chat_id, status_text)
+                        res = cursor.fetchone()
+                        if res:
+                            coins, power, territory = res
+                            status_text = f"🏰 قلمرو: {territory}\n💰 سکه‌ها: {coins}\n⚡ قدرت جنگی: {power}"
+                            send_message(chat_id, status_text)
                         
                     elif data == "coins":
                         cursor.execute("UPDATE players SET coins = coins + 20 WHERE chat_id = ?", (chat_id,))
@@ -124,17 +132,19 @@ data = query["data"]  # تورفتگی درست شد
                         
                     elif data == "battle":
                         cursor.execute("SELECT power FROM players WHERE chat_id = ?", (chat_id,))
-                        player_power = cursor.fetchone()[0]
-                        enemy_power = random.randint(5, 25)
-                        
-                        if player_power >= enemy_power:
-                            cursor.execute("UPDATE players SET coins = coins + 50, power = power + 5 WHERE chat_id = ?", (chat_id,))
-                            db.commit()
-                            send_message(chat_id, f"⚔️ نبرد پیروزمندانه بود! (قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nپاداش: 50 سکه و 5 قدرت!")
-                        else:
-                            send_message(chat_id, f"💥 در نبرد شکست خوردی! (قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nنیاز به تقویت قدرت داری!")
+                        res = cursor.fetchone()
+                        if res:
+                            player_power = res[0]
+                            enemy_power = random.randint(5, 25)
+                            
+                            if player_power >= enemy_power:
+                                cursor.execute("UPDATE players SET coins = coins + 50, power = power + 5 WHERE chat_id = ?", (chat_id,))
+                                db.commit()
+                                send_message(chat_id, f"⚔️ نبرد پیروزمندانه بود! (قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nپاداش: 50 سکه و 5 قدرت!")
+                            else:
+                                send_message(chat_id, f"💥 در نبرد شکست خوردی! (قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nنیاز به تقویت قدرت داری!")
 
         time.sleep(1)
 
-if name == "__main__":
+if __name__ == "__main__":
     main()
