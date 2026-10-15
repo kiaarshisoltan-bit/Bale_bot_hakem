@@ -34,7 +34,7 @@ BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 db = sqlite3.connect("game.db", check_same_thread=False)
 cursor = db.cursor()
 
-# ساخت جدول با ستون‌های جدید (برد، باخت، کشته‌ها)
+# ساخت جدول با ستون‌های بازی
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS players (
     chat_id INTEGER PRIMARY KEY,
@@ -75,7 +75,6 @@ def send_message(chat_id, text, reply_markup=None):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-# تابع ساخت کیبورد متنی (زیر صفحه)
 def get_main_keyboard():
     return {
         "keyboard": [
@@ -87,8 +86,18 @@ def get_main_keyboard():
         "one_time_keyboard": False
     }
 
+# تابع کمکی برای پیدا کردن رتبه دقیق یک بازیکن در هر ستون
+def get_player_rank(chat_id, column_name):
+    # همه بازیکنان رو به ترتیب نزولی از اون ستون می‌گیریم
+    cursor.execute(f"SELECT chat_id FROM players ORDER BY {column_name} DESC")
+    all_players = cursor.fetchall()
+    for index, row in enumerate(all_players, 1):
+        if row[0] == chat_id:
+            return index
+    return 0
+
 def main():
-    print("Bot is starting up with advanced leaderboard...")
+    print("Bot is starting up with ranked leaderboard...")
     offset = None
     
     while True:
@@ -103,7 +112,6 @@ def main():
                     user_name = message["from"].get("first_name", "بازیکن")
                     text = message.get("text", "")
                     
-                    # ثبت نام خودکار بازیکن در دیتابیس (و هندل کردن دیتابیس‌های قدیمی که ستون‌ها رو ندارند)
                     cursor.execute("SELECT * FROM players WHERE chat_id = ?", (chat_id,))
                     player = cursor.fetchone()
                     if not player:
@@ -112,8 +120,8 @@ def main():
                         
                     if text == "/start":
                         welcome_text = (
-                            f"سلام {user_name} عزیز! به بازی پیشرفته «حاکم قلمرو» خوش اومدی. 👑\n\n"
-                            "حالا جدول برترین‌ها بسیار کامل‌تر شده و می‌تونی آمار جنگ‌هات رو ببيني!"
+                            f"سلام {user_name} عزیز! به بازی «حاکم قلمرو» خوش اومدی. 👑\n\n"
+                            "حالا می‌تونی رتبه خودت رو در بخش‌های مختلف جدول ببینی!"
                         )
                         send_message(chat_id, welcome_text, get_main_keyboard())
                         
@@ -172,25 +180,28 @@ def main():
                                 send_message(chat_id, f"💥 در نبرد شکست خوردی!\n(قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nباید با ساخت سرباز قدرتت رو بیشتر کنی!", get_main_keyboard())
                                 
                     elif text == "🏆 جدول برترین‌ها":
-                        # ۱. پولدارترین‌ها
+                        # گرفتن اطلاعات ۵ نفر برتر برای هر بخش
                         cursor.execute("SELECT name, coins FROM players ORDER BY coins DESC LIMIT 5")
                         top_coins = cursor.fetchall()
                         
-                        # ۲. بیشترین سرباز
                         cursor.execute("SELECT name, soldiers FROM players ORDER BY soldiers DESC LIMIT 5")
                         top_soldiers = cursor.fetchall()
                         
-                        # ۳. بیشترین برد
                         cursor.execute("SELECT name, wins FROM players ORDER BY wins DESC LIMIT 5")
                         top_wins = cursor.fetchall()
                         
-                        # ۴. بیشترین باخت
                         cursor.execute("SELECT name, losses FROM players ORDER BY losses DESC LIMIT 5")
                         top_losses = cursor.fetchall()
                         
-                        # ۵. بیشترین کشته
                         cursor.execute("SELECT name, kills FROM players ORDER BY kills DESC LIMIT 5")
                         top_kills = cursor.fetchall()
+                        
+                        # گرفتن رتبه بازیکن فعلی در هر بخش
+                        my_rank_coins = get_player_rank(chat_id, "coins")
+                        my_rank_soldiers = get_player_rank(chat_id, "soldiers")
+                        my_rank_wins = get_player_rank(chat_id, "wins")
+                        my_rank_losses = get_player_rank(chat_id, "losses")
+                        my_rank_kills = get_player_rank(chat_id, "kills")
                         
                         # ساخت متن گزارش
                         report = "🏆 **جدول بزرگ برترین‌های حاکم قلمرو** 🏆\n\n"
@@ -198,26 +209,27 @@ def main():
                         report += "💰 **پولدارترین‌ها (سکه):**\n"
                         for i, p in enumerate(top_coins, 1):
                             report += f"{i}. {p[0]} ➜ {p[1]} سکه\n"
-                        report += "\n"
+                        report += f"📍 رتبه شما: **{my_rank_coins}**\n\n"
                         
                         report += "🛡️ **بزرگترین ارتش‌ها (سرباز):**\n"
                         for i, p in enumerate(top_soldiers, 1):
                             report += f"{i}. {p[0]} ➜ {p[1]} سرباز\n"
-                        report += "\n"
+                        report += f"📍 رتبه شما: **{my_rank_soldiers}**\n\n"
                         
                         report += "⚔️ **پرافتخارترین‌ها (بیشترین برد):**\n"
                         for i, p in enumerate(top_wins, 1):
                             report += f"{i}. {p[0]} ➜ {p[1]} برد\n"
-                        report += "\n"
+                        report += f"📍 رتبه شما: **{my_rank_wins}**\n\n"
                         
                         report += "💥 **آسیب‌پذیرترین‌ها (بیشترین باخت):**\n"
                         for i, p in enumerate(top_losses, 1):
                             report += f"{i}. {p[0]} ➜ {p[1]} باخت\n"
-                        report += "\n"
+                        report += f"📍 رتبه شما: **{my_rank_losses}**\n\n"
                         
                         report += "💀 **خطرناک‌ترین جنگجویان (بیشترین کشته):**\n"
                         for i, p in enumerate(top_kills, 1):
                             report += f"{i}. {p[0]} ➜ {p[1]} کشته\n"
+                        report += f"📍 رتبه شما: **{my_rank_kills}**"
 
                         send_message(chat_id, report, get_main_keyboard())
 
@@ -225,4 +237,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                            
