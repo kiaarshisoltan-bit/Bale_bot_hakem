@@ -34,7 +34,7 @@ BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 db = sqlite3.connect("game.db", check_same_thread=False)
 cursor = db.cursor()
 
-# ساخت جدول با ستون‌های جدید (سربازان)
+# ساخت جدول با ستون‌های جدید (برد، باخت، کشته‌ها)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS players (
     chat_id INTEGER PRIMARY KEY,
@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS players (
     coins INTEGER DEFAULT 100,
     power INTEGER DEFAULT 15,
     soldiers INTEGER DEFAULT 0,
+    wins INTEGER DEFAULT 0,
+    losses INTEGER DEFAULT 0,
+    kills INTEGER DEFAULT 0,
     territory TEXT DEFAULT 'روستای متروکه'
 )
 """)
@@ -85,7 +88,7 @@ def get_main_keyboard():
     }
 
 def main():
-    print("Bot is starting up with new features...")
+    print("Bot is starting up with advanced leaderboard...")
     offset = None
     
     while True:
@@ -100,7 +103,7 @@ def main():
                     user_name = message["from"].get("first_name", "بازیکن")
                     text = message.get("text", "")
                     
-                    # ثبت نام خودکار بازیکن در دیتابیس
+                    # ثبت نام خودکار بازیکن در دیتابیس (و هندل کردن دیتابیس‌های قدیمی که ستون‌ها رو ندارند)
                     cursor.execute("SELECT * FROM players WHERE chat_id = ?", (chat_id,))
                     player = cursor.fetchone()
                     if not player:
@@ -109,21 +112,23 @@ def main():
                         
                     if text == "/start":
                         welcome_text = (
-                            f"سلام {user_name} عزیز! به نسخه جدید بازی «حاکم قلمرو» خوش اومدی. 👑\n\n"
-                            "حالا می‌تونی سرباز بسازی، سکه جمع کنی و توی جدول برترین‌ها رقابت کنی!"
+                            f"سلام {user_name} عزیز! به بازی پیشرفته «حاکم قلمرو» خوش اومدی. 👑\n\n"
+                            "حالا جدول برترین‌ها بسیار کامل‌تر شده و می‌تونی آمار جنگ‌هات رو ببيني!"
                         )
                         send_message(chat_id, welcome_text, get_main_keyboard())
                         
                     elif text == "🏰 وضعیت قلمرو":
-                        cursor.execute("SELECT coins, power, soldiers, territory FROM players WHERE chat_id = ?", (chat_id,))
+                        cursor.execute("SELECT coins, power, soldiers, wins, losses, kills, territory FROM players WHERE chat_id = ?", (chat_id,))
                         res = cursor.fetchone()
                         if res:
-                            coins, power, soldiers, territory = res
+                            coins, power, soldiers, wins, losses, kills, territory = res
                             status_text = (
                                 f"🏰 قلمرو: {territory}\n"
                                 f"💰 سکه‌ها: {coins}\n"
                                 f"🛡️ تعداد سربازان: {soldiers}\n"
-                                f"⚡ قدرت کل جنگی: {power}"
+                                f"⚡ قدرت کل جنگی: {power}\n"
+                                f"⚔️ بردها: {wins} | 💥 باخت‌ها: {losses}\n"
+                                f"💀 دشمنان کشته‌شده: {kills}"
                             )
                             send_message(chat_id, status_text, get_main_keyboard())
                             
@@ -153,21 +158,71 @@ def main():
                             
                             if player_power >= enemy_power:
                                 reward_coins = random.randint(40, 80)
-                                cursor.execute("UPDATE players SET coins = coins + ?, power = power + 5 WHERE chat_id = ?", (reward_coins, chat_id))
+                                enemy_kills_earned = random.randint(1, 5)
+                                cursor.execute("""
+                                    UPDATE players 
+                                    SET coins = coins + ?, power = power + 5, wins = wins + 1, kills = kills + ? 
+                                    WHERE chat_id = ?
+                                """, (reward_coins, enemy_kills_earned, chat_id))
                                 db.commit()
-                                send_message(chat_id, f"⚔️ نبرد پیروزمندانه بود!\n(قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\n🏆 پاداش: {reward_coins} سکه و ۵ قدرت!", get_main_keyboard())
+                                send_message(chat_id, f"⚔️ نبرد پیروزمندانه بود!\n(قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\n🏆 پاداش: {reward_coins} سکه، ۵ قدرت و کشته شدن {enemy_kills_earned} دشمن!", get_main_keyboard())
                             else:
+                                cursor.execute("UPDATE players SET losses = losses + 1 WHERE chat_id = ?", (chat_id,))
+                                db.commit()
                                 send_message(chat_id, f"💥 در نبرد شکست خوردی!\n(قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nباید با ساخت سرباز قدرتت رو بیشتر کنی!", get_main_keyboard())
                                 
                     elif text == "🏆 جدول برترین‌ها":
-                        cursor.execute("SELECT name, coins, power FROM players ORDER BY coins DESC LIMIT 5")
-                        top_players = cursor.fetchall()
-                        leaderboard_text = "🏆 **۵ حاکم برتر قلمرو:**\n\n"
-                        for idx, p in enumerate(top_players, 1):
-                            leaderboard_text += f"{idx}. {p[0]} ➜ 💰 {p[1]} سکه | ⚡ قدرت: {p[2]}\n"
-                        send_message(chat_id, leaderboard_text, get_main_keyboard())
+                        # ۱. پولدارترین‌ها
+                        cursor.execute("SELECT name, coins FROM players ORDER BY coins DESC LIMIT 5")
+                        top_coins = cursor.fetchall()
+                        
+                        # ۲. بیشترین سرباز
+                        cursor.execute("SELECT name, soldiers FROM players ORDER BY soldiers DESC LIMIT 5")
+                        top_soldiers = cursor.fetchall()
+                        
+                        # ۳. بیشترین برد
+                        cursor.execute("SELECT name, wins FROM players ORDER BY wins DESC LIMIT 5")
+                        top_wins = cursor.fetchall()
+                        
+                        # ۴. بیشترین باخت
+                        cursor.execute("SELECT name, losses FROM players ORDER BY losses DESC LIMIT 5")
+                        top_losses = cursor.fetchall()
+                        
+                        # ۵. بیشترین کشته
+                        cursor.execute("SELECT name, kills FROM players ORDER BY kills DESC LIMIT 5")
+                        top_kills = cursor.fetchall()
+                        
+                        # ساخت متن گزارش
+                        report = "🏆 **جدول بزرگ برترین‌های حاکم قلمرو** 🏆\n\n"
+                        
+                        report += "💰 **پولدارترین‌ها (سکه):**\n"
+                        for i, p in enumerate(top_coins, 1):
+                            report += f"{i}. {p[0]} ➜ {p[1]} سکه\n"
+                        report += "\n"
+                        
+                        report += "🛡️ **بزرگترین ارتش‌ها (سرباز):**\n"
+                        for i, p in enumerate(top_soldiers, 1):
+                            report += f"{i}. {p[0]} ➜ {p[1]} سرباز\n"
+                        report += "\n"
+                        
+                        report += "⚔️ **پرافتخارترین‌ها (بیشترین برد):**\n"
+                        for i, p in enumerate(top_wins, 1):
+                            report += f"{i}. {p[0]} ➜ {p[1]} برد\n"
+                        report += "\n"
+                        
+                        report += "💥 **آسیب‌پذیرترین‌ها (بیشترین باخت):**\n"
+                        for i, p in enumerate(top_losses, 1):
+                            report += f"{i}. {p[0]} ➜ {p[1]} باخت\n"
+                        report += "\n"
+                        
+                        report += "💀 **خطرناک‌ترین جنگجویان (بیشترین کشته):**\n"
+                        for i, p in enumerate(top_kills, 1):
+                            report += f"{i}. {p[0]} ➜ {p[1]} کشته\n"
+
+                        send_message(chat_id, report, get_main_keyboard())
 
         time.sleep(1)
 
 if __name__ == "__main__":
     main()
+                                
