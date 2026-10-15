@@ -7,7 +7,7 @@ import time
 import random
 import sqlite3
 
-# --- بخش اول: سرور وب کوچک برای فریب دادن رندر (جلوگیری از خطای پورت و نگه داشتن ربات) ---
+# --- سرور وب برای رندر ---
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -15,23 +15,18 @@ class SimpleHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is alive and running!")
 
     def log_message(self, format, *args):
-        # این خط باعث میشه لاگ‌های اضافی سرور وب، لاگ‌های اصلی رباتت رو شلوغ نکنه
         return
 
 def run_web_server():
-    # رندر پورت رو از طریق متغیر محیطی میگه، اگر نبود از 10000 استفاده کن
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
     print(f"Web server starting on port {port}...")
     server.serve_forever()
 
-# اجرای سرور وب در پس‌زمینه به محض شروع برنامه
 web_thread = threading.Thread(target=run_web_server, daemon=True)
 web_thread.start()
 # ---------------------------------------------------------------------
 
-# تنظیمات ربات بله
-# حتماً در پنل رندر در قسمت Environment Variables، متغیر TOKEN رو تعریف کن
 TOKEN = os.environ.get("TOKEN")
 BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 
@@ -39,13 +34,14 @@ BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
 db = sqlite3.connect("game.db", check_same_thread=False)
 cursor = db.cursor()
 
-# ساخت جدول کاربران و قلمروها اگر وجود نداشته باشند
+# ساخت جدول با ستون‌های جدید (سربازان)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS players (
     chat_id INTEGER PRIMARY KEY,
     name TEXT,
     coins INTEGER DEFAULT 100,
-    power INTEGER DEFAULT 10,
+    power INTEGER DEFAULT 15,
+    soldiers INTEGER DEFAULT 0,
     territory TEXT DEFAULT 'روستای متروکه'
 )
 """)
@@ -76,8 +72,20 @@ def send_message(chat_id, text, reply_markup=None):
     except Exception as e:
         print(f"Error sending message: {e}")
 
+# تابع ساخت کیبورد متنی (زیر صفحه)
+def get_main_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "🏰 وضعیت قلمرو"}, {"text": "💰 کارخانه سکه"}],
+            [{"text": "🛡️ ساخت سرباز (۴۰ سکه)"}, {"text": "⚔️ نبرد تصادفی"}],
+            [{"text": "🏆 جدول برترین‌ها"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False
+    }
+
 def main():
-    print("Bot is starting up...")
+    print("Bot is starting up with new features...")
     offset = None
     
     while True:
@@ -101,48 +109,63 @@ def main():
                         
                     if text == "/start":
                         welcome_text = (
-                            f"سلام {user_name} عزیز! به بازی «حاکم قلمرو» خوش اومدی. 👑\n\n"
-                            "قلمرو خودت رو بساز، سکه جمع کن و با بقیه بجنگ تا حاکم مطلق بشی!"
+                            f"سلام {user_name} عزیز! به نسخه جدید بازی «حاکم قلمرو» خوش اومدی. 👑\n\n"
+                            "حالا می‌تونی سرباز بسازی، سکه جمع کنی و توی جدول برترین‌ها رقابت کنی!"
                         )
-                        keyboard = {
-                            "inline_keyboard": [
-                                [{"text": "🏰 وضعیت قلمرو", "callback_data": "status"}, {"text": "💰 کارخانه سکه", "callback_data": "coins"}],
-                                [{"text": "⚔️ نبرد تصادفی", "callback_data": "battle"}]
-                            ]
-                        }
-                        send_message(chat_id, welcome_text, keyboard)
+                        send_message(chat_id, welcome_text, get_main_keyboard())
                         
-                elif "callback_query" in update:
-                    query = update["callback_query"]
-                    chat_id = query["message"]["chat"]["id"]
-                    data = query["data"]
-                    
-                    if data == "status":
-                        cursor.execute("SELECT coins, power, territory FROM players WHERE chat_id = ?", (chat_id,))
+                    elif text == "🏰 وضعیت قلمرو":
+                        cursor.execute("SELECT coins, power, soldiers, territory FROM players WHERE chat_id = ?", (chat_id,))
                         res = cursor.fetchone()
                         if res:
-                            coins, power, territory = res
-                            status_text = f"🏰 قلمرو: {territory}\n💰 سکه‌ها: {coins}\n⚡ قدرت جنگی: {power}"
-                            send_message(chat_id, status_text)
-                        
-                    elif data == "coins":
-                        cursor.execute("UPDATE players SET coins = coins + 20 WHERE chat_id = ?", (chat_id,))
+                            coins, power, soldiers, territory = res
+                            status_text = (
+                                f"🏰 قلمرو: {territory}\n"
+                                f"💰 سکه‌ها: {coins}\n"
+                                f"🛡️ تعداد سربازان: {soldiers}\n"
+                                f"⚡ قدرت کل جنگی: {power}"
+                            )
+                            send_message(chat_id, status_text, get_main_keyboard())
+                            
+                    elif text == "💰 کارخانه سکه":
+                        cursor.execute("UPDATE players SET coins = coins + 30 WHERE chat_id = ?", (chat_id,))
                         db.commit()
-                        send_message(chat_id, "💰 کارخانه کار کرد و 20 سکه به خزانه اضافه شد!")
+                        send_message(chat_id, "💰 کارخانه فعال شد و ۳۰ سکه به خزانه واریز شد!", get_main_keyboard())
                         
-                    elif data == "battle":
+                    elif text == "🛡️ ساخت سرباز (۴۰ سکه)":
+                        cursor.execute("SELECT coins, power, soldiers FROM players WHERE chat_id = ?", (chat_id,))
+                        res = cursor.fetchone()
+                        if res:
+                            coins, power, soldiers = res
+                            if coins >= 40:
+                                cursor.execute("UPDATE players SET coins = coins - 40, soldiers = soldiers + 1, power = power + 10 WHERE chat_id = ?", (chat_id,))
+                                db.commit()
+                                send_message(chat_id, "🛡️ یک سرباز جدید به ارتش شما پیوست! (+۱۰ قدرت جنگی)", get_main_keyboard())
+                            else:
+                                send_message(chat_id, f"❌ سکه کافی نداری! برای هر سرباز به ۴۰ سکه نیاز داری. (سکه فعلی: {coins})", get_main_keyboard())
+                                
+                    elif text == "⚔️ نبرد تصادفی":
                         cursor.execute("SELECT power FROM players WHERE chat_id = ?", (chat_id,))
                         res = cursor.fetchone()
                         if res:
                             player_power = res[0]
-                            enemy_power = random.randint(5, 25)
+                            enemy_power = random.randint(10, 40)
                             
                             if player_power >= enemy_power:
-                                cursor.execute("UPDATE players SET coins = coins + 50, power = power + 5 WHERE chat_id = ?", (chat_id,))
+                                reward_coins = random.randint(40, 80)
+                                cursor.execute("UPDATE players SET coins = coins + ?, power = power + 5 WHERE chat_id = ?", (reward_coins, chat_id))
                                 db.commit()
-                                send_message(chat_id, f"⚔️ نبرد پیروزمندانه بود! (قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nپاداش: 50 سکه و 5 قدرت!")
+                                send_message(chat_id, f"⚔️ نبرد پیروزمندانه بود!\n(قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\n🏆 پاداش: {reward_coins} سکه و ۵ قدرت!", get_main_keyboard())
                             else:
-                                send_message(chat_id, f"💥 در نبرد شکست خوردی! (قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nنیاز به تقویت قدرت داری!")
+                                send_message(chat_id, f"💥 در نبرد شکست خوردی!\n(قدرت شما: {player_power} | قدرت دشمن: {enemy_power})\nباید با ساخت سرباز قدرتت رو بیشتر کنی!", get_main_keyboard())
+                                
+                    elif text == "🏆 جدول برترین‌ها":
+                        cursor.execute("SELECT name, coins, power FROM players ORDER BY coins DESC LIMIT 5")
+                        top_players = cursor.fetchall()
+                        leaderboard_text = "🏆 **۵ حاکم برتر قلمرو:**\n\n"
+                        for idx, p in enumerate(top_players, 1):
+                            leaderboard_text += f"{idx}. {p[0]} ➜ 💰 {p[1]} سکه | ⚡ قدرت: {p[2]}\n"
+                        send_message(chat_id, leaderboard_text, get_main_keyboard())
 
         time.sleep(1)
 
