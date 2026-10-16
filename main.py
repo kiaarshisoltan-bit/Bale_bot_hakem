@@ -1,347 +1,578 @@
-import os
-import threading
-import requests
-import json
-import random
 import sqlite3
+import threading
 import time
-from flask import Flask, render_template_string, request, jsonify
+import os
+import requests
+from flask import Flask
 
-# --- راه‌اندازی سرور Flask برای وب‌اپ و سلامت سرور ---
+# تنظیمات اصلی ربات
+TOKEN = os.environ.get("TOKEN", "YOUR_BALE_TOKEN_HERE")
+URL = f"https://tapi.bale.ai/bot{TOKEN}/"
+
+# راه‌اندازی Flask برای UptimeRobot و پایش سلامت سرور
 app = Flask(__name__)
 
-@app.route('/health')
-def health_check():
-    """مسیر اختصاصی و فوق‌العاده سریع برای جلوگیری از بلاک شدن و پینگ UptimeRobot"""
+
+@app.route("/")
+def home():
+    return "حاکم قلمرو - سرور فعال است! 👑"
+
+
+@app.route("/health")
+def health():
     return "OK", 200
 
-# اتصال به دیتابیس SQLite
-def get_db_connection():
-    conn = sqlite3.connect("game.db", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
-# ساخت جدول دیتابیس
-db = sqlite3.connect("game.db", check_same_thread=False)
-cursor = db.cursor()
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS players (
-    chat_id INTEGER PRIMARY KEY,
-    name TEXT,
-    coins INTEGER DEFAULT 100,
-    power INTEGER DEFAULT 15,
-    soldiers INTEGER DEFAULT 0,
-    wins INTEGER DEFAULT 0,
-    losses INTEGER DEFAULT 0,
-    kills INTEGER DEFAULT 0,
-    territory TEXT DEFAULT 'روستای متروکه'
-)
-""")
-db.commit()
-
-# صفحه گرافیکی وب‌اپ (HTML / CSS)
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>حاکم قلمرو - مدیریت قلعه</title>
-    <style>
-        body {
-            background-color: #1a1a2e;
-            color: #e94560;
-            font-family: Tahoma, sans-serif;
-            text-align: center;
-            padding: 20px;
-            margin: 0;
-        }
-        .container {
-            max-width: 400px;
-            margin: auto;
-            background: #16213e;
-            border-radius: 15px;
-            padding: 20px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.4);
-            border: 2px solid #0f3460;
-        }
-        h1 {
-            color: #f7cb15;
-            font-size: 24px;
-            margin-bottom: 5px;
-        }
-        .subtitle {
-            color: #a0a0a0;
-            font-size: 13px;
-            margin-bottom: 20px;
-        }
-        .stats-card {
-            background: #0f3460;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-            color: #fff;
-            text-align: right;
-            border-right: 5px solid #e94560;
-        }
-        .stat-item {
-            margin: 8px 0;
-            font-size: 15px;
-        }
-        .btn {
-            background-color: #e94560;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            margin: 8px 0;
-            width: 100%;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: 0.2s;
-        }
-        .btn:active {
-            transform: scale(0.97);
-        }
-        .btn-factory { background-color: #f7cb15; color: #1a1a2e; }
-        .btn-soldier { background-color: #00b4d8; }
-        .btn-battle { background-color: #e63946; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>👑 حاکم قلمرو</h1>
-        <div class="subtitle">پنل مدیریت سلطنتی</div>
-
-        <div class="stats-card">
-            <div class="stat-item">🏰 <b>قلمرو:</b> <span id="territory">{{ territory }}</span></div>
-            <div class="stat-item">💰 <b>سکه‌ها:</b> <span id="coins">{{ coins }}</span></div>
-            <div class="stat-item">🛡️ <b>سربازان:</b> <span id="soldiers">{{ soldiers }}</span></div>
-            <div class="stat-item">⚡ <b>قدرت جنگی:</b> <span id="power">{{ power }}</span></div>
-            <div class="stat-item">⚔️ <b>برد / باخت:</b> {{ wins }} برد | {{ losses }} باخت</div>
-            <div class="stat-item">💀 <b>دشمنان کشته:</b> {{ kills }}</div>
-        </div>
-
-        <button class="btn btn-factory" onclick="doAction('factory')">💰 کارخانه سکه (+۳۰)</button>
-        <button class="btn btn-soldier" onclick="doAction('soldier')">🛡️ ساخت سرباز (۴۰ سکه)</button>
-        <button class="btn btn-battle" onclick="doAction('battle')">⚔️ نبرد تصادفی</button>
-    </div>
-
-    <script>
-        const chatId = "{{ chat_id }}";
-
-        function doAction(actionType) {
-            fetch('/action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chat_id: chatId, action: actionType })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if(data.success) {
-                    document.getElementById('coins').innerText = data.coins;
-                    document.getElementById('soldiers').innerText = data.soldiers;
-                    document.getElementById('power').innerText = data.power;
-                    alert(data.message);
-                } else {
-                    alert(data.message);
-                }
-            });
-        }
-    </script>
-</body>
-</html>
-"""
-
-@app.route('/')
-def web_app():
-    chat_id = request.args.get('chat_id', default=1, type=int)
-    conn = get_db_connection()
-    player = conn.execute("SELECT * FROM players WHERE chat_id = ?", (chat_id,)).fetchone()
-    
-    if not player:
-        conn.execute("INSERT INTO players (chat_id, name) VALUES (?, ?)", (chat_id, "بازیکن وب"))
-        conn.commit()
-        player = conn.execute("SELECT * FROM players WHERE chat_id = ?", (chat_id,)).fetchone()
-    
-    conn.close()
-    
-    return render_template_string(
-        HTML_TEMPLATE,
-        chat_id=player['chat_id'],
-        territory=player['territory'],
-        coins=player['coins'],
-        soldiers=player['soldiers'],
-        power=player['power'],
-        wins=player['wins'],
-        losses=player['losses'],
-        kills=player['kills']
-    )
-
-@app.route('/action', methods=['POST'])
-def handle_action():
-    data = request.json
-    chat_id = data.get('chat_id')
-    action = data.get('action')
-    
-    conn = get_db_connection()
-    player = conn.execute("SELECT * FROM players WHERE chat_id = ?", (chat_id,)).fetchone()
-    
-    if not player:
-        conn.close()
-        return jsonify({"success": False, "message": "بازیکن یافت نشد!"})
-    
-    coins = player['coins']
-    soldiers = player['soldiers']
-    power = player['power']
-    wins = player['wins']
-    losses = player['losses']
-    kills = player['kills']
-    
-    message = ""
-    if action == 'factory':
-        coins += 30
-        conn.execute("UPDATE players SET coins = ? WHERE chat_id = ?", (coins, chat_id))
-        conn.commit()
-        message = "💰 کارخانه فعال شد و ۳۰ سکه واریز شد!"
-        
-    elif action == 'soldier':
-        if coins >= 40:
-            coins -= 40
-            soldiers += 1
-            power += 10
-            conn.execute("UPDATE players SET coins = ?, soldiers = ?, power = ? WHERE chat_id = ?", (coins, soldiers, power, chat_id))
-            conn.commit()
-            message = "🛡️ یک سرباز جدید به ارتش شما پیوست!"
-        else:
-            conn.close()
-            return jsonify({"success": False, "message": f"❌ سکه کافی نداری! (سکه فعلی: {coins})"})
-            
-    elif action == 'battle':
-        enemy_power = random.randint(10, 40)
-        if power >= enemy_power:
-            reward_coins = random.randint(40, 80)
-            enemy_kills_earned = random.randint(1, 5)
-            coins += reward_coins
-            power += 5
-            wins += 1
-            kills += enemy_kills_earned
-            conn.execute("UPDATE players SET coins = ?, power = ?, wins = ?, kills = ? WHERE chat_id = ?", (coins, power, wins, kills, chat_id))
-            conn.commit()
-            message = f"⚔️ پیروزی در نبرد!\nپاداش: {reward_coins} سکه و {enemy_kills_earned} کشته!"
-        else:
-            losses += 1
-            conn.execute("UPDATE players SET losses = ? WHERE chat_id = ?", (losses, chat_id))
-            conn.commit()
-            message = f"💥 شکست در نبرد!\nقدرت شما: {power} | قدرت دشمن: {enemy_power}"
-            
-    conn.close()
-    return jsonify({
-        "success": True,
-        "coins": coins,
-        "soldiers": soldiers,
-        "power": power,
-        "message": message
-    })
-
-def run_flask_server():
+def run_flask():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=port)
 
+
+# پینگ خودکار برای جلوگیری از خواب رفتن هاست رایگان (Render)
 def self_ping():
-    """پینگ خودکار هر ۱۰ دقیقه برای بیدار نگه داشتن سرور در رندر"""
-    time.sleep(15)  # کمی صبر می‌کنیم تا سرور بالا بیاید
-    app_url = os.environ.get("RENDER_EXTERNAL_URL")
-    if not app_url:
-        return
-    health_url = f"{app_url}/health"
-    
     while True:
-        try:
-            time.sleep(600)  # هر ۶۰۰ ثانیه (۱۰ دقیقه)
-            requests.get(health_url, timeout=10)
-            print("Self-ping sent successfully.")
-        except Exception as e:
-            print(f"Self-ping error: {e}")
+        time.sleep(600)  # هر 10 دقیقه
+        external_url = os.environ.get("RENDER_EXTERNAL_URL")
+        if external_url:
+            try:
+                requests.get(f"{external_url}/health")
+            except:
+                pass
 
-# اجرای وب‌سرور و پینگ خودکار در تردهای جداگانه
-web_thread = threading.Thread(target=run_flask_server, daemon=True)
-web_thread.start()
 
-ping_thread = threading.Thread(target=self_ping, daemon=True)
-ping_thread.start()
-# ---------------------------------------------------------------------
+# راه‌اندازی دیتابیس SQLite
+def init_db():
+    conn = sqlite3.connect("game.db", check_same_thread=False)
+    cursor = conn.cursor()
 
-TOKEN = os.environ.get("TOKEN")
-BASE_URL = f"https://tapi.bale.ai/bot{TOKEN}"
+    # جدول بازیکنان
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS players (
+            chat_id INTEGER PRIMARY KEY,
+            name TEXT,
+            coins INTEGER DEFAULT 100,
+            diamonds INTEGER DEFAULT 50,
+            power INTEGER DEFAULT 15,
+            soldiers INTEGER DEFAULT 0,
+            meat INTEGER DEFAULT 0,
+            factories INTEGER DEFAULT 0,
+            butchers INTEGER DEFAULT 0,
+            wins INTEGER DEFAULT 0,
+            losses INTEGER DEFAULT 0,
+            kills INTEGER DEFAULT 0,
+            territory TEXT DEFAULT 'روستای متروکه',
+            clan_id INTEGER DEFAULT 0
+        )
+    """)
 
-def get_updates(offset=None):
-    url = f"{BASE_URL}/getUpdates"
-    params = {"timeout": 30}
-    if offset:
-        params["offset"] = offset
-    try:
-        response = requests.get(url, params=params, timeout=35)
-        return response.json()
-    except Exception as e:
-        print(f"Error getting updates: {e}")
-        return None
+    # جدول الماس دهکده (ظرفیت حداکثر 600)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS village_resources (
+            chat_id INTEGER PRIMARY KEY,
+            diamonds INTEGER DEFAULT 600,
+            last_diamond_regen REAL
+        )
+    """)
 
+    # جدول اتحادها (Clan)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS clans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            leader_id INTEGER
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+# تابع کمکی برای دسترسی به دیتابیس
+def get_db():
+    return sqlite3.connect("game.db", check_same_thread=False)
+
+
+# ترد زمان‌بندی منابع (کارخانه: هر 1 دقیقه سکه | قصابی: هر 30 ثانیه 10 گوشت | الماس: بازسازی تدریجی تا 600)
+def resource_production_loop():
+    while True:
+        time.sleep(30)  # هر 30 ثانیه چک می‌شود
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT chat_id, factories, butchers FROM players"
+        )
+        players = cursor.fetchall()
+
+        for chat_id, factories, butchers in players:
+            # هر کارخانه در هر دقیقه 10 سکه (پس در هر 30 ثانیه 5 سکه)
+            added_coins = factories * 5
+            # هر قصابی هر 30 ثانیه 10 گوشت
+            added_meat = butchers * 10
+
+            cursor.execute(
+                """
+                UPDATE players 
+                SET coins = coins + ?, meat = meat + ? 
+                WHERE chat_id = ?
+            """,
+                (added_coins, added_meat, chat_id),
+            )
+
+            # بازسازی الماس دهکده (حداکثر 600)
+            cursor.execute(
+                """
+                SELECT diamonds FROM village_resources WHERE chat_id = ?
+            """,
+                (chat_id,),
+            )
+            res = cursor.fetchone()
+            if res:
+                d_val = res[0]
+                if d_val < 600:
+                    new_d = min(600, d_val + 5)  # هر 30 ثانیه 5 تا الماس اضافه میشه
+                    cursor.execute(
+                        """
+                        UPDATE village_resources SET diamonds = ? WHERE chat_id = ?
+                    """,
+                        (new_d, chat_id),
+                    )
+            else:
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO village_resources (chat_id, diamonds) VALUES (?, 600)
+                """,
+                    (chat_id,),
+                )
+
+        conn.commit()
+        conn.close()
+
+
+# توابع ارسال پیام و کیبورد شیشه‌ای به بله
 def send_message(chat_id, text, reply_markup=None):
-    url = f"{BASE_URL}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
+    payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
-        payload["reply_markup"] = json.dumps(reply_markup)
+        payload["reply_markup"] = reply_markup
     try:
-        requests.post(url, json=payload)
+        requests.post(URL + "sendMessage", json=payload)
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def main():
-    print("Bot is starting up with Flask WebApp support...")
-    offset = None
-    app_url = os.environ.get("RENDER_EXTERNAL_URL", "https://your-app.onrender.com")
 
+# مدیریت پیام‌ها و دستورات ربات بله
+def handle_updates():
+    offset = 0
     while True:
-        updates = get_updates(offset)
-        if updates and "result" in updates:
-            for update in updates["result"]:
-                offset = update["update_id"] + 1
-                
-                if "message" in update:
-                    message = update["message"]
-                    chat_id = message["chat"]["id"]
-                    user_name = message["from"].get("first_name", "بازیکن")
-                    text = message.get("text", "")
-                    
-                    cursor = db.cursor()
-                    cursor.execute("SELECT * FROM players WHERE chat_id = ?", (chat_id,))
-                    player = cursor.fetchone()
-                    if not player:
-                        cursor.execute("INSERT INTO players (chat_id, name) VALUES (?, ?)", (chat_id, user_name))
-                        db.commit()
-                        
-                    if text == "/start":
-                        user_webapp_url = f"{app_url}/?chat_id={chat_id}"
-                        
-                        keyboard = {
-                            "inline_keyboard": [
-                                [{"text": "🌐 ورود به پنل گرافیکی قلمرو", "url": user_webapp_url}]
-                            ]
-                        }
-                        
-                        welcome_text = (
-                            f"سلام {user_name} عزیز! 👑\n"
-                            "به نسخه گرافیکی و مدرن **«حاکم قلمرو»** خوش اومدی.\n\n"
-                            "برای مدیریت قلعه، ارتش و نبردها، روی دکمه زیر بزن تا پنل گرافیکی برات باز بشه!"
-                        )
-                        send_message(chat_id, welcome_text, keyboard)
+        try:
+            response = requests.get(
+                URL + "getUpdates", params={"offset": offset, "timeout": 30}
+            )
+            data = response.json()
+            if "result" in data:
+                for update in data["result"]:
+                    offset = update["update_id"] + 1
 
-        time.sleep(1)
+                    if "message" in update:
+                        msg = update["message"]
+                        chat_id = msg["chat"]["id"]
+                        text = msg.get("text", "")
+                        name = msg["from"].get("first_name", "حاکم")
+
+                        process_command(chat_id, name, text)
+
+                    elif "callback_query" in update:
+                        cq = update["callback_query"]
+                        chat_id = cq["message"]["chat"]["id"]
+                        data_call = cq["data"]
+                        name = cq["from"].get("first_name", "حاکم")
+
+                        process_callback(chat_id, name, data_call)
+        except Exception as e:
+            print(f"Polling error: {e}")
+            time.sleep(5)
+
+
+def process_command(chat_id, name, text):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # ثبت نام بازیکن اگر وجود نداشت
+    cursor.execute(
+        "SELECT chat_id FROM players WHERE chat_id = ?", (chat_id,)
+    )
+    if not cursor.fetchone():
+        cursor.execute(
+            "INSERT INTO players (chat_id, name) VALUES (?, ?)", (chat_id, name)
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO village_resources (chat_id, diamonds) VALUES (?, 600)",
+            (chat_id,),
+        )
+        conn.commit()
+
+    conn.close()
+
+    if text == "/start" or text == "منو":
+        send_main_menu(chat_id, name)
+    else:
+        send_message(
+            chat_id,
+            "دستور نامعتبر! برای ورود به دربار و مدیریت قلمرو دکمه زیر را بزنید:",
+            {
+                "inline_keyboard": [
+                    [{"text": "🏰 ورود به دربار (منو)", "callback_data": "menu"}]
+                ]
+            },
+        )
+
+
+def send_main_menu(chat_id, name):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT coins, meat, soldiers, factories, butchers, territory FROM players WHERE chat_id = ?",
+        (chat_id,),
+    )
+    row = cursor.fetchone()
+
+    cursor.execute(
+        "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+    )
+    d_row = cursor.fetchone()
+    diamonds = d_row[0] if d_row else 600
+
+    conn.close()
+
+    if row:
+        coins, meat, soldiers, factories, butchers, territory = row
+        text = (
+            f"👑 سلام حاکم بزرگ، **{name}**!\n"
+            f"🏰 قلمرو: {territory}\n\n"
+            f"💰 سکه: {coins} | 💎 الماس: {diamonds} / 600\n"
+            f"🥩 گوشت: {meat} | 🪖 سربازان: {soldiers}\n"
+            f"🏭 کارخانه: {factories} (تولید: 10 سکه/دقیقه)\n"
+            f"🥩 قصابی: {butchers} (تولید: 10 گوشت/30ثانیه)\n\n"
+            "از دکمه‌های زیر برای مدیریت امپراتوری خود استفاده کنید:"
+        )
+
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "🏭 ساخت کارخانه (100 سکه)",
+                        "callback_data": "build_factory",
+                    },
+                    {
+                        "text": "🥩 ساخت قصابی (80 سکه)",
+                        "callback_data": "build_butcher",
+                    },
+                ],
+                [
+                    {
+                        "text": "🪖 استخدام سرباز (2 گوشت)",
+                        "callback_data": "recruit_soldier",
+                    },
+                    {
+                        "text": "🛒 بازار سیاه (الماس)",
+                        "callback_data": "black_market",
+                    },
+                ],
+                [
+                    {
+                        "text": "⚔️ نبرد با بازیکنان دیگر (PvP)",
+                        "callback_data": "pvp_list",
+                    },
+                    {
+                        "text": "🛡️ اتحادها و قبیله‌ها",
+                        "callback_data": "clans_menu",
+                    },
+                ],
+                [{"text": "🔄 بروزرسانی وضعیت", "callback_data": "menu"}],
+            ]
+        }
+        send_message(chat_id, text, keyboard)
+
+
+def process_callback(chat_id, name, data):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    if data == "menu":
+        conn.close()
+        send_main_menu(chat_id, name)
+        return
+
+    elif data == "build_factory":
+        cursor.execute("SELECT coins FROM players WHERE chat_id = ?", (chat_id,))
+        coins = cursor.fetchone()[0]
+        if coins >= 100:
+            cursor.execute(
+                "UPDATE players SET coins = coins - 100, factories = factories + 1 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            conn.commit()
+            send_message(
+                chat_id,
+                "✅ یک کارخانه جدید ساخته شد! (هر دقیقه 10 سکه تولید می‌کند)",
+            )
+        else:
+            send_message(chat_id, "❌ سکه کافی برای ساخت کارخانه نداری! (100 سکه نیاز است)")
+
+    elif data == "build_butcher":
+        cursor.execute("SELECT coins FROM players WHERE chat_id = ?", (chat_id,))
+        coins = cursor.fetchone()[0]
+        if coins >= 80:
+            cursor.execute(
+                "UPDATE players SET coins = coins - 80, butchers = butchers + 1 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            conn.commit()
+            send_message(
+                chat_id,
+                "✅ یک قصابی ساخته شد! (هر 30 ثانیه 10 گوشت تولید می‌کند)",
+            )
+        else:
+            send_message(chat_id, "❌ سکه کافی برای ساخت قصابی نداری! (80 سکه نیاز است)")
+
+    elif data == "recruit_soldier":
+        cursor.execute("SELECT meat FROM players WHERE chat_id = ?", (chat_id,))
+        meat = cursor.fetchone()[0]
+        if meat >= 2:
+            cursor.execute(
+                "UPDATE players SET meat = meat - 2, soldiers = soldiers + 1 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            conn.commit()
+            send_message(chat_id, "🪖 یک سرباز وفادار به ارتش پیوست!")
+        else:
+            send_message(chat_id, "❌ گوشت کافی نداری! ساخت هر سرباز 2 گوشت می‌خواهد.")
+
+    elif data == "black_market":
+        cursor.execute(
+            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+        )
+        res = cursor.fetchone()
+        diamonds = res[0] if res else 600
+
+        text = (
+            f"🛒 **بازار سیاه (محل داد و ستد با الماس)**\n\n"
+            f"💎 الماس‌های شما: {diamonds} / 600\n\n"
+            "چه چیزی می‌خواهید بخرید؟"
+        )
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "📦 خرید 50 سکه (10 الماس)",
+                        "callback_data": "buy_coins",
+                    },
+                    {
+                        "text": "🥩 خرید 20 گوشت (15 الماس)",
+                        "callback_data": "buy_meat",
+                    },
+                ],
+                [
+                    {
+                        "text": "⚔️ خرید قدرت جنگی (+10 قدرت، 30 الماس)",
+                        "callback_data": "buy_power",
+                    }
+                ],
+                [{"text": "🔙 بازگشت به دربار", "callback_data": "menu"}],
+            ]
+        }
+        conn.close()
+        send_message(chat_id, text, keyboard)
+        return
+
+    elif data == "buy_coins":
+        cursor.execute(
+            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+        )
+        diamonds = cursor.fetchone()[0]
+        if diamonds >= 10:
+            cursor.execute(
+                "UPDATE village_resources SET diamonds = diamonds - 10 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            cursor.execute(
+                "UPDATE players SET coins = coins + 50 WHERE chat_id = ?", (chat_id,)
+            )
+            conn.commit()
+            send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!")
+        else:
+            send_message(chat_id, "❌ الماس کافی نداری!")
+
+    elif data == "buy_meat":
+        cursor.execute(
+            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+        )
+        diamonds = cursor.fetchone()[0]
+        if diamonds >= 15:
+            cursor.execute(
+                "UPDATE village_resources SET diamonds = diamonds - 15 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            cursor.execute(
+                "UPDATE players SET meat = meat + 20 WHERE chat_id = ?", (chat_id,)
+            )
+            conn.commit()
+            send_message(chat_id, "✅ 20 گوشت با موفقیت از بازار سیاه خریداری شد!")
+        else:
+            send_message(chat_id, "❌ الماس کافی نداری! (15 الماس نیاز است)")
+
+    elif data == "buy_power":
+        cursor.execute(
+            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+        )
+        diamonds = cursor.fetchone()[0]
+        if diamonds >= 30:
+            cursor.execute(
+                "UPDATE village_resources SET diamonds = diamonds - 30 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            cursor.execute(
+                "UPDATE players SET power = power + 10 WHERE chat_id = ?", (chat_id,)
+            )
+            conn.commit()
+            send_message(chat_id, "✅ تجهیزات جنگی خریداری شد! قدرت شما 10 واحد افزایش یافت.")
+        else:
+            send_message(chat_id, "❌ الماس کافی نداری!")
+
+    elif data == "pvp_list":
+        cursor.execute(
+            "SELECT chat_id, name, territory, soldiers FROM players WHERE chat_id != ?",
+            (chat_id,),
+        )
+        targets = cursor.fetchall()
+        if not targets:
+            conn.close()
+            send_message(
+                chat_id,
+                "⚠️ هنوز بازیکن دیگری در ربات ثبت‌نام نکرده است تا به او حمله کنید!",
+                {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "🔙 بازگشت",
+                                "callback_data": "menu",
+                            }
+                        ]
+                    ]
+                },
+            )
+            return
+
+        keyboard = []
+        for t_id, t_name, t_terr, t_sold in targets:
+            keyboard.append([
+                {
+                    "text": f"⚔️ حمله به {t_name} ({t_terr}) [سرباز: {t_sold}]",
+                    "callback_data": f"attack_{t_id}",
+                }
+            ])
+        keyboard.append([{"text": "🔙 بازگشت", "callback_data": "menu"}])
+        conn.close()
+        send_message(
+            chat_id,
+            "🎯 حریف خود را برای نبرد انتخاب کنید:",
+            {"inline_keyboard": keyboard},
+        )
+        return
+
+    elif data.startswith("attack_"):
+        target_id = int(data.split("_")[1])
+        cursor.execute(
+            "SELECT name, power, soldiers, coins FROM players WHERE chat_id = ?",
+            (chat_id,),
+        )
+        attacker = cursor.fetchone()
+
+        cursor.execute(
+            "SELECT name, power, soldiers, coins FROM players WHERE chat_id = ?",
+            (target_id,),
+        )
+        defender = cursor.fetchone()
+
+        if not defender:
+            conn.close()
+            send_message(chat_id, "❌ این بازیکن دیگر در دسترس نیست.")
+            return
+
+        att_power = attacker[1] + (attacker[2] * 5)
+        def_power = defender[1] + (defender[2] * 5)
+
+        if att_power >= def_power:
+            loot = min(50, defender[3])
+            cursor.execute(
+                "UPDATE players SET coins = coins + ?, wins = wins + 1 WHERE chat_id = ?",
+                (loot, chat_id),
+            )
+            cursor.execute(
+                "UPDATE players SET coins = coins - ?, losses = losses + 1 WHERE chat_id = ?",
+                (loot, target_id),
+            )
+            conn.commit()
+            send_message(
+                chat_id,
+                f"🎉 پیروزی بزرگ!\nشما به قلمرو **{defender[0]}** یورش بردید و با غلبه بر ارتش او، {loot} سکه غنیمت گرفتید!",
+            )
+            send_message(
+                target_id,
+                f"⚠️ هشدار! حاکم **{attacker[0]}** به قلمرو شما حمله کرد و شما نبرد را باختید و {loot} سکه از دست دادید!",
+            )
+        else:
+            cursor.execute(
+                "UPDATE players SET losses = losses + 1 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            cursor.execute(
+                "UPDATE players SET wins = wins + 1 WHERE chat_id = ?",
+                (target_id,),
+            )
+            conn.commit()
+            send_message(
+                chat_id,
+                f"💥 شکست تلخ!\nارتش شما در برابر مدافعان **{defender[0]}** شکست خورد و عقب‌نشینی کرد.",
+            )
+            send_message(
+                target_id,
+                f"🛡️ دفاع موفق!\nحاکم **{attacker[0]}** به شما حمله کرد اما دلاوران شما مانع از نفوذ او شدند!",
+            )
+
+    elif data == "clans_menu":
+        send_message(
+            chat_id,
+            "🛡️ سیستم اتحادها و قبیله‌ها به زودی فعال خواهد شد تا با دوستانتان متحد شوید!",
+            {
+                "inline_keyboard": [
+                    [{"text": "🔙 بازگشت", "callback_data": "menu"}]
+                ]
+            },
+        )
+
+    conn.close()
+    send_main_menu(chat_id, name)
+
 
 if __name__ == "__main__":
-    main()
+    # اجرای Flask در یک ترد جداگانه
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # اجرای ترد تولید منابع خودکار
+    resource_thread = threading.Thread(target=resource_production_loop)
+    resource_thread.daemon = True
+    resource_thread.start()
+
+    # اجرای ترد پینگ خودکار برای جلوگیری از خواب رفتن رندر
+    ping_thread = threading.Thread(target=self_ping)
+    ping_thread.daemon = True
+    ping_thread.start()
+
+    # اجرای حلقه دریافت پیام‌های ربات بله
+    handle_updates()
