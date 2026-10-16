@@ -194,14 +194,13 @@ def resource_production_loop():
                 rows = cursor.fetchall()
 
                 for chat_id, factories, butchers in rows:
-                    coin_gain = factories * 5  # هر کارخانه ۵ سکه در ۳۰ ثانیه
-                    meat_gain = butchers * 10  # هر قصابی ۱۰ گوشت در ۳۰ ثانیه
+                    coin_gain = factories * 5
+                    meat_gain = butchers * 10
                     cursor.execute(
                         "UPDATE players SET coins = coins + ?, meat = meat + ? WHERE chat_id = ?",
                         (coin_gain, meat_gain, chat_id),
                     )
 
-                # بازسازی الماس روستاها (حداکثر ۶۰۰)
                 cursor.execute(
                     "SELECT chat_id, diamonds FROM village_resources"
                 )
@@ -226,7 +225,7 @@ def self_ping():
     if not render_url:
         return
     while True:
-        time.sleep(600)  # هر ۱۰ دقیقه
+        time.sleep(600)
         try:
             requests.get(f"{render_url}/health", timeout=10)
         except Exception as e:
@@ -246,7 +245,6 @@ def handle_message(message):
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
 
-        # بررسی ثبت‌نام بازیکن
         cursor.execute(
             "SELECT coins, diamonds, power, soldiers, meat, factories, butchers, territory, clan_id, state FROM players WHERE chat_id = ?",
             (chat_id,),
@@ -284,7 +282,6 @@ def handle_message(message):
             state,
         ) = player
 
-        # مدیریت حالت ساخت اتحاد
         if state == "WAITING_CLAN_NAME":
             clan_name = text
             if clan_name.startswith("🔙"):
@@ -330,7 +327,6 @@ def handle_message(message):
                 )
             return
 
-        # مدیریت حالت انتخاب حریف برای نبرد PvP
         if state.startswith("ATTACKING_"):
             target_id = int(state.split("_")[1])
             cursor.execute(
@@ -393,7 +389,6 @@ def handle_message(message):
                 )
             return
 
-        # دستورات اصلی منو
         if text == "/start" or text == "🔙 بازگشت به منوی اصلی":
             cursor.execute(
                 "UPDATE players SET state = 'NORMAL' WHERE chat_id = ?",
@@ -732,17 +727,12 @@ def handle_updates():
 
 
 if __name__ == "__main__":
-    # استارت ترد تولید منابع
     threading.Thread(target=resource_production_loop, daemon=True).start()
-
-    # استارت ترد پینگ خودکار
     threading.Thread(target=self_ping, daemon=True).start()
 
-    # استارت سرور وب فلشک در یک ترد جداگانه برای رندر
     port = int(os.environ.get("PORT", 10000))
     threading.Thread(
         target=lambda: app.run(host="0.0.0.0", port=port), daemon=True
     ).start()
 
-    # اجرای حلقه اصلی دریافت پیام‌ها در ترد اصلی
     handle_updates()
