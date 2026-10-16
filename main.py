@@ -102,7 +102,9 @@ def resource_production_loop():
         conn = get_db()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT chat_id, factories, butchers FROM players")
+        cursor.execute(
+            "SELECT chat_id, factories, butchers FROM players"
+        )
         players = cursor.fetchall()
 
         for chat_id, factories, butchers in players:
@@ -221,11 +223,12 @@ def process_message(chat_id, name, text):
     cursor = conn.cursor()
 
     # ثبت نام بازیکن اگر وجود نداشت (سکه اولیه 180)
-    cursor.execute("SELECT chat_id FROM players WHERE chat_id = ?", (chat_id,))
+    cursor.execute(
+        "SELECT chat_id FROM players WHERE chat_id = ?", (chat_id,)
+    )
     if not cursor.fetchone():
         cursor.execute(
-            "INSERT INTO players (chat_id, name, coins) VALUES (?, ?, 180)",
-            (chat_id, name),
+            "INSERT INTO players (chat_id, name, coins) VALUES (?, ?, 180)", (chat_id, name)
         )
         cursor.execute(
             "INSERT OR IGNORE INTO village_resources (chat_id, diamonds) VALUES (?, 600)",
@@ -367,7 +370,7 @@ def process_message(chat_id, name, text):
                     "callback_data": f"attack_{t_id}",
                 }
             ])
-
+        
         send_message(
             chat_id,
             "🎯 **لیست حریفان برای حمله:**\nروی دکمه‌ی حریف مورد نظر خود کلیک کنید:",
@@ -381,32 +384,29 @@ def process_message(chat_id, name, text):
         p_clan = cursor.fetchone()[0]
 
         if p_clan == 0:
+            # کاربر بدون اتحاد است
             cursor.execute("SELECT id, name FROM clans")
             clans = cursor.fetchall()
             conn.close()
 
-            keyboard = [
-                [{"text": "➕ ساخت اتحاد جدید", "callback_data": "create_clan"}]
-            ]
+            keyboard = [[{"text": "➕ ساخت اتحاد جدید", "callback_data": "create_clan"}]]
             for c_id, c_name in clans:
                 keyboard.append([{
                     "text": f"🛡️ پیوستن به اتحاد: {c_name}",
-                    "callback_data": f"join_clan_{c_id}",
+                    "callback_data": f"join_clan_{c_id}"
                 }])
 
             send_message(
                 chat_id,
                 "🛡️ شما هنوز عضو هیچ اتحاد و قبیله‌ای نیستید.\nمی‌توانید یک اتحاد جدید بسازید یا به اتحادهای موجود بپیوندید:",
-                {"inline_keyboard": keyboard},
+                {"inline_keyboard": keyboard}
             )
         else:
             cursor.execute("SELECT name FROM clans WHERE id = ?", (p_clan,))
             clan_res = cursor.fetchone()
             clan_name = clan_res[0] if clan_res else "اتحاد ناشناخته"
-
-            cursor.execute(
-                "SELECT name FROM players WHERE clan_id = ?", (p_clan,)
-            )
+            
+            cursor.execute("SELECT name FROM players WHERE clan_id = ?", (p_clan,))
             members = cursor.fetchall()
             conn.close()
 
@@ -420,11 +420,7 @@ def process_message(chat_id, name, text):
             send_message(
                 chat_id,
                 clan_text,
-                {
-                    "inline_keyboard": [[
-                        {"text": "🚪 ترک اتحاد", "callback_data": "leave_clan"}
-                    ]]
-                },
+                {"inline_keyboard": [[{"text": "🚪 ترک اتحاد", "callback_data": "leave_clan"}]]}
             )
 
     else:
@@ -450,8 +446,7 @@ def process_callback(chat_id, name, data):
                 (chat_id,),
             )
             cursor.execute(
-                "UPDATE players SET coins = coins + 50 WHERE chat_id = ?",
-                (chat_id,),
+                "UPDATE players SET coins = coins + 50 WHERE chat_id = ?", (chat_id,)
             )
             conn.commit()
             send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!")
@@ -469,8 +464,7 @@ def process_callback(chat_id, name, data):
                 (chat_id,),
             )
             cursor.execute(
-                "UPDATE players SET meat = meat + 20 WHERE chat_id = ?",
-                (chat_id,),
+                "UPDATE players SET meat = meat + 20 WHERE chat_id = ?", (chat_id,)
             )
             conn.commit()
             send_message(chat_id, "✅ 20 گوشت با موفقیت از بازار سیاه خریداری شد!")
@@ -478,31 +472,22 @@ def process_callback(chat_id, name, data):
             send_message(chat_id, "❌ الماس کافی نداری! (15 الماس نیاز است)")
 
     elif data == "create_clan":
+        # ساخت اتحاد ساده (نام پیش‌فرض بر اساس نام حاکم)
         clan_name = f"اتحاد {name}"
-        cursor.execute(
-            "INSERT INTO clans (name, leader_id) VALUES (?, ?)",
-            (clan_name, chat_id),
-        )
+        cursor.execute("INSERT INTO clans (name, leader_id) VALUES (?, ?)", (clan_name, chat_id))
         clan_id = cursor.lastrowid
-        cursor.execute(
-            "UPDATE players SET clan_id = ? WHERE chat_id = ?",
-            (clan_id, chat_id),
-        )
+        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (clan_id, chat_id))
         conn.commit()
         send_message(chat_id, f"🏰 اتحاد «{clan_name}» با موفقیت تأسیس شد!")
 
     elif data.startswith("join_clan_"):
         c_id = int(data.split("_")[2])
-        cursor.execute(
-            "UPDATE players SET clan_id = ? WHERE chat_id = ?", (c_id, chat_id)
-        )
+        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (c_id, chat_id))
         conn.commit()
         send_message(chat_id, "🛡️ با موفقیت به اتحاد مورد نظر پیوستید!")
 
     elif data == "leave_clan":
-        cursor.execute(
-            "UPDATE players SET clan_id = 0 WHERE chat_id = ?", (chat_id,)
-        )
+        cursor.execute("UPDATE players SET clan_id = 0 WHERE chat_id = ?", (chat_id,))
         conn.commit()
         send_message(chat_id, "🚪 شما اتحاد خود را ترک کردید.")
 
