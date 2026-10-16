@@ -45,12 +45,12 @@ def init_db():
     conn = sqlite3.connect("game.db", check_same_thread=False)
     cursor = conn.cursor()
 
-    # جدول بازیکنان
+    # جدول بازیکنان (سکه اولیه 180)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS players (
             chat_id INTEGER PRIMARY KEY,
             name TEXT,
-            coins INTEGER DEFAULT 100,
+            coins INTEGER DEFAULT 180,
             diamonds INTEGER DEFAULT 50,
             power INTEGER DEFAULT 15,
             soldiers INTEGER DEFAULT 0,
@@ -185,7 +185,7 @@ def get_main_keyboard():
     }
 
 
-# مدیریت ورودی‌های ربات (هم پیام‌های متنی و هم دکمه‌های شیشه‌ای)
+# مدیریت ورودی‌های ربات
 def handle_updates():
     offset = 0
     while True:
@@ -222,13 +222,13 @@ def process_message(chat_id, name, text):
     conn = get_db()
     cursor = conn.cursor()
 
-    # ثبت نام بازیکن اگر وجود نداشت
+    # ثبت نام بازیکن اگر وجود نداشت (سکه اولیه 180)
     cursor.execute(
         "SELECT chat_id FROM players WHERE chat_id = ?", (chat_id,)
     )
     if not cursor.fetchone():
         cursor.execute(
-            "INSERT INTO players (chat_id, name) VALUES (?, ?)", (chat_id, name)
+            "INSERT INTO players (chat_id, name, coins) VALUES (?, ?, 180)", (chat_id, name)
         )
         cursor.execute(
             "INSERT OR IGNORE INTO village_resources (chat_id, diamonds) VALUES (?, 600)",
@@ -326,7 +326,7 @@ def process_message(chat_id, name, text):
         market_text = (
             f"🛒 **بازار سیاه (محل داد و ستد با الماس)**\n\n"
             f"💎 الماس‌های شما: {diamonds} / 600\n\n"
-            "برای خرید هر آیتم، از دکمه‌های شیشه‌ای زیر استفاده کنید:"
+            "برای خرید سکه یا گوشت از دکمه‌های زیر استفاده کنید:"
         )
         market_keyboard = {
             "inline_keyboard": [
@@ -339,13 +339,7 @@ def process_message(chat_id, name, text):
                         "text": "🥩 خرید 20 گوشت (15 الماس)",
                         "callback_data": "buy_meat",
                     },
-                ],
-                [
-                    {
-                        "text": "⚔️ خرید قدرت جنگی (+10 قدرت، 30 الماس)",
-                        "callback_data": "buy_power",
-                    }
-                ],
+                ]
             ]
         }
         send_message(chat_id, market_text, market_keyboard)
@@ -384,11 +378,50 @@ def process_message(chat_id, name, text):
         )
 
     elif text == "🛡️ اتحادها":
-        send_message(
-            chat_id,
-            "🛡️ سیستم اتحادها و قبیله‌ها به زودی فعال خواهد شد تا با دوستانتان متحد شوید!",
-            get_main_keyboard(),
-        )
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT clan_id FROM players WHERE chat_id = ?", (chat_id,))
+        p_clan = cursor.fetchone()[0]
+
+        if p_clan == 0:
+            # کاربر بدون اتحاد است
+            cursor.execute("SELECT id, name FROM clans")
+            clans = cursor.fetchall()
+            conn.close()
+
+            keyboard = [[{"text": "➕ ساخت اتحاد جدید", "callback_data": "create_clan"}]]
+            for c_id, c_name in clans:
+                keyboard.append([{
+                    "text": f"🛡️ پیوستن به اتحاد: {c_name}",
+                    "callback_data": f"join_clan_{c_id}"
+                }])
+
+            send_message(
+                chat_id,
+                "🛡️ شما هنوز عضو هیچ اتحاد و قبیله‌ای نیستید.\nمی‌توانید یک اتحاد جدید بسازید یا به اتحادهای موجود بپیوندید:",
+                {"inline_keyboard": keyboard}
+            )
+        else:
+            cursor.execute("SELECT name FROM clans WHERE id = ?", (p_clan,))
+            clan_res = cursor.fetchone()
+            clan_name = clan_res[0] if clan_res else "اتحاد ناشناخته"
+            
+            cursor.execute("SELECT name FROM players WHERE clan_id = ?", (p_clan,))
+            members = cursor.fetchall()
+            conn.close()
+
+            member_list = ", ".join([m[0] for m in members])
+            clan_text = (
+                f"🛡️ **اطلاعات اتحاد شما:**\n"
+                f"🏷 نام اتحاد: {clan_name}\n"
+                f"👥 اعضای اتحاد: {member_list}\n\n"
+                "برای ترک اتحاد می‌توانید از دکمه زیر استفاده کنید:"
+            )
+            send_message(
+                chat_id,
+                clan_text,
+                {"inline_keyboard": [[{"text": "🚪 ترک اتحاد", "callback_data": "leave_clan"}]]}
+            )
 
     else:
         send_message(
@@ -438,23 +471,25 @@ def process_callback(chat_id, name, data):
         else:
             send_message(chat_id, "❌ الماس کافی نداری! (15 الماس نیاز است)")
 
-    elif data == "buy_power":
-        cursor.execute(
-            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
-        )
-        diamonds = cursor.fetchone()[0]
-        if diamonds >= 30:
-            cursor.execute(
-                "UPDATE village_resources SET diamonds = diamonds - 30 WHERE chat_id = ?",
-                (chat_id,),
-            )
-            cursor.execute(
-                "UPDATE players SET power = power + 10 WHERE chat_id = ?", (chat_id,)
-            )
-            conn.commit()
-            send_message(chat_id, "✅ تجهیزات جنگی خریداری شد! قدرت شما 10 واحد افزایش یافت.")
-        else:
-            send_message(chat_id, "❌ الماس کافی نداری!")
+    elif data == "create_clan":
+        # ساخت اتحاد ساده (نام پیش‌فرض بر اساس نام حاکم)
+        clan_name = f"اتحاد {name}"
+        cursor.execute("INSERT INTO clans (name, leader_id) VALUES (?, ?)", (clan_name, chat_id))
+        clan_id = cursor.lastrowid
+        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (clan_id, chat_id))
+        conn.commit()
+        send_message(chat_id, f"🏰 اتحاد «{clan_name}» با موفقیت تأسیس شد!")
+
+    elif data.startswith("join_clan_"):
+        c_id = int(data.split("_")[2])
+        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (c_id, chat_id))
+        conn.commit()
+        send_message(chat_id, "🛡️ با موفقیت به اتحاد مورد نظر پیوستید!")
+
+    elif data == "leave_clan":
+        cursor.execute("UPDATE players SET clan_id = 0 WHERE chat_id = ?", (chat_id,))
+        conn.commit()
+        send_message(chat_id, "🚪 شما اتحاد خود را ترک کردید.")
 
     elif data.startswith("attack_"):
         target_id = int(data.split("_")[1])
