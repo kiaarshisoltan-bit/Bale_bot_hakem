@@ -148,9 +148,7 @@ def resource_production_loop():
 
         conn.commit()
         conn.close()
-
-
-# تابع ارسال پیام عمومی (پشتیبانی از انواع کیبوردها)
+        # تابع ارسال پیام عمومی (پشتیبانی از انواع کیبوردها)
 def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
@@ -232,9 +230,7 @@ def ensure_village_resources(cursor, chat_id):
         )
         return 600
     return res[0]
-
-
-def process_message(chat_id, name, text):
+    def process_message(chat_id, name, text):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -252,8 +248,48 @@ def process_message(chat_id, name, text):
         )
         conn.commit()
 
+    # وضعیت قلمرو کاربر
+    cursor.execute(
+        "SELECT territory FROM players WHERE chat_id = ?",
+        (chat_id,)
+    )
+    territory_row = cursor.fetchone()
+    territory = territory_row[0] if territory_row else "روستای متروکه"
+
+    # اگر قلمرو هنوز پیش‌فرض است، اول باید نام قلمرو انتخاب شود
+    if territory == "روستای متروکه":
+        if text in ["/start", "منو", "🏰 وضعیت دربار"]:
+            send_message(
+                chat_id,
+                "👑 خوش آمدی حاکم جدید!\n\nبرای شروع امپراتوری‌ات، نام قلمرو خود را بنویس:\n\nمثال: «قلمرو آتش»، «سرزمین خورشید»، «پادشاهی شمال»"
+            )
+        else:
+            new_territory = text.strip()
+            if len(new_territory) < 2:
+                send_message(
+                    chat_id,
+                    "⚠️ نام قلمرو خیلی کوتاه است! لطفاً یک نام مناسب‌تر انتخاب کن:"
+                )
+            else:
+                cursor.execute(
+                    "UPDATE players SET territory = ? WHERE chat_id = ?",
+                    (new_territory, chat_id)
+                )
+                conn.commit()
+                send_message(
+                    chat_id,
+                    f"🏰 قلمرو «{new_territory}» با موفقیت ثبت شد!\n\nاین وضعیت دربار توست:",
+                )
+                conn.close()
+                send_main_menu(chat_id, name)
+                return
+
+        conn.close()
+        return
+
     conn.close()
 
+    # از اینجا به بعد، کاربر قلمرو دارد و منطق قبلی ادامه پیدا می‌کند
     if text == "/start" or text == "منو" or text == "🏰 وضعیت دربار":
         send_main_menu(chat_id, name)
 
@@ -358,7 +394,6 @@ def process_message(chat_id, name, text):
         send_message(chat_id, market_text, market_keyboard)
 
     elif text == "⚔️ نبرد با بازیکنان (PvP)":
-        # انتخاب پویا: هر بار یک بازیکن رندوم واقعی
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
@@ -451,9 +486,7 @@ def process_message(chat_id, name, text):
             "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
             get_main_keyboard(),
         )
-
-
-def process_callback(chat_id, name, data):
+        def process_callback(chat_id, name, data):
     conn = get_db()
     cursor = conn.cursor()
 
