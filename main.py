@@ -358,37 +358,47 @@ def process_message(chat_id, name, text):
         send_message(chat_id, market_text, market_keyboard)
 
     elif text == "⚔️ نبرد با بازیکنان (PvP)":
+        # انتخاب پویا: هر بار یک بازیکن رندوم واقعی
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT chat_id, name, territory, soldiers FROM players WHERE chat_id != ?",
+            "SELECT chat_id, name, territory, soldiers, power FROM players WHERE chat_id != ? ORDER BY RANDOM() LIMIT 1",
             (chat_id,),
         )
-        targets = cursor.fetchall()
+        enemy = cursor.fetchone()
         conn.close()
 
-        if not targets:
+        if not enemy:
             send_message(
                 chat_id,
-                "⚠️ هنوز بازیکن دیگری در ربات ثبت‌نام نکرده است!",
+                "⚠️ هنوز هیچ بازیکن دیگری در ربات ثبت‌نام نکرده است!",
                 get_main_keyboard(),
             )
             return
 
-        keyboard = []
-        for t_id, t_name, t_terr, t_sold in targets:
-            keyboard.append([
-                {
-                    "text": f"⚔️ حمله به {t_name} ({t_terr}) [سرباز: {t_sold}]",
-                    "callback_data": f"attack_{t_id}",
-                }
-            ])
-        
-        send_message(
-            chat_id,
-            "🎯 لیست حریفان برای حمله:\nروی دکمه‌ی حریف مورد نظر خود کلیک کنید:",
-            {"inline_keyboard": keyboard},
+        enemy_id, enemy_name, enemy_territory, enemy_soldiers, enemy_power = enemy
+
+        text_show = (
+            "🎯 هدفی برای حمله پیدا شد!\n\n"
+            f"👑 نام حاکم: {enemy_name}\n"
+            f"🏰 قلمرو: {enemy_territory}\n"
+            f"🪖 سربازان: {enemy_soldiers}\n"
+            f"⚔️ قدرت پایه: {enemy_power}\n\n"
+            "اگر آماده‌ای، از دکمه زیر برای حمله استفاده کن:"
         )
+
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": f"⚔️ حمله به قلمرو {enemy_territory}",
+                        "callback_data": f"attack_random_{enemy_id}",
+                    }
+                ]
+            ]
+        }
+
+        send_message(chat_id, text_show, keyboard)
 
     elif text == "🛡️ اتحادها":
         conn = get_db()
@@ -397,7 +407,6 @@ def process_message(chat_id, name, text):
         p_clan = cursor.fetchone()[0]
 
         if p_clan == 0:
-            # کاربر بدون اتحاد است
             cursor.execute("SELECT id, name FROM clans")
             clans = cursor.fetchall()
             conn.close()
@@ -481,7 +490,6 @@ def process_callback(chat_id, name, data):
             send_message(chat_id, "❌ الماس کافی نداری! (15 الماس نیاز است)", get_main_keyboard())
 
     elif data == "create_clan":
-        # ساخت اتحاد ساده (نام پیش‌فرض بر اساس نام حاکم)
         clan_name = f"اتحاد {name}"
         cursor.execute("INSERT INTO clans (name, leader_id) VALUES (?, ?)", (clan_name, chat_id))
         clan_id = cursor.lastrowid
@@ -514,17 +522,15 @@ def process_callback(chat_id, name, data):
         )
         defender = cursor.fetchone()
 
-        if not defender or not attacker:
+        if not defender:
             conn.close()
             send_message(chat_id, "❌ این بازیکن دیگر در دسترس نیست.", get_main_keyboard())
             return
 
-        # قدرت: قدرت پایه + 10 برای هر سرباز
         att_power = attacker[1] + (attacker[2] * 10)
         def_power = defender[1] + (defender[2] * 10)
 
         if att_power >= def_power:
-            # غنیمت حداکثر 50، و جلوگیری از منفی شدن سکه مدافع
             loot = min(50, defender[3])
             cursor.execute(
                 "UPDATE players SET coins = coins + ?, wins = wins + 1 WHERE chat_id = ?",
@@ -565,6 +571,82 @@ def process_callback(chat_id, name, data):
                 target_id,
                 f"🛡️ دفاع موفق!\nحاکم {attacker[0]} به شما حمله کرد اما دلاوران شما مانع از نفوذ او شدند!",
                 get_main_keyboard(),
+            )
+
+    elif data.startswith("attack_random_"):
+        target_id = int(data.split("_")[2])
+
+        cursor.execute(
+            "SELECT name, power, soldiers, coins FROM players WHERE chat_id = ?",
+            (chat_id,)
+        )
+        attacker = cursor.fetchone()
+
+        cursor.execute(
+            "SELECT name, power, soldiers, coins FROM players WHERE chat_id = ?",
+            (target_id,)
+        )
+        defender = cursor.fetchone()
+
+        if not defender or not attacker:
+            send_message(chat_id, "❌ این قلمرو دیگر وجود ندارد!", get_main_keyboard())
+            conn.close()
+            return
+
+        att_name, att_power_base, att_soldiers, att_coins = attacker
+        def_name, def_power_base, def_soldiers, def_coins = defender
+
+        att_power = att_power_base + att_soldiers * 10
+        def_power = def_power_base + def_soldiers * 10
+
+        if att_power >= def_power:
+            loot = min(50, def_coins)
+
+            cursor.execute(
+                "UPDATE players SET coins = coins + ?, wins = wins + 1 WHERE chat_id = ?",
+                (loot, chat_id)
+            )
+
+            new_def_coins = max(0, def_coins - loot)
+            cursor.execute(
+                "UPDATE players SET coins = ?, losses = losses + 1 WHERE chat_id = ?",
+                (new_def_coins, target_id)
+            )
+
+            conn.commit()
+
+            send_message(
+                chat_id,
+                f"🎉 پیروزی بزرگ!\nقلمرو {def_name} را شکست دادی و {loot} سکه غنیمت گرفتی!",
+                get_main_keyboard()
+            )
+
+            send_message(
+                target_id,
+                f"⚠️ هشدار!\nحاکم {att_name} به قلمرو شما حمله کرد و شما نبرد را باختید و {loot} سکه از دست دادید!",
+                get_main_keyboard()
+            )
+        else:
+            cursor.execute(
+                "UPDATE players SET losses = losses + 1 WHERE chat_id = ?",
+                (chat_id,)
+            )
+            cursor.execute(
+                "UPDATE players SET wins = wins + 1 WHERE chat_id = ?",
+                (target_id,)
+            )
+            conn.commit()
+
+            send_message(
+                chat_id,
+                f"💥 شکست خوردی!\nارتش {def_name} قوی‌تر بود و مجبور به عقب‌نشینی شدی.",
+                get_main_keyboard()
+            )
+
+            send_message(
+                target_id,
+                f"🛡️ دفاع موفق!\nحاکم {att_name} به شما حمله کرد اما دلاوران شما مانع نفوذ او شدند!",
+                get_main_keyboard()
             )
 
     conn.close()
