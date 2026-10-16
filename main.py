@@ -230,7 +230,9 @@ def ensure_village_resources(cursor, chat_id):
         )
         return 600
     return res[0]
-    def process_message(chat_id, name, text):
+
+
+def process_message(chat_id, name, text):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -247,7 +249,7 @@ def ensure_village_resources(cursor, chat_id):
             (chat_id,),
         )
         conn.commit()
-
+        
     # وضعیت قلمرو کاربر
     cursor.execute(
         "SELECT territory FROM players WHERE chat_id = ?",
