@@ -149,7 +149,7 @@ def resource_production_loop():
         conn.close()
 
 
-# تابع ارسال پیام با کیبورد متنی (پایین صفحه)
+# تابع ارسال پیام عمومی (پشتیبانی از انواع کیبوردها)
 def send_message(chat_id, text, reply_markup=None):
     payload = {"chat_id": chat_id, "text": text}
     if reply_markup:
@@ -160,7 +160,7 @@ def send_message(chat_id, text, reply_markup=None):
         print(f"Error sending message: {e}")
 
 
-# کیبورد اصلی پایین صفحه (Reply Keyboard)
+# کیبورد اصلی ثابت (پایین صفحه)
 def get_main_keyboard():
     return {
         "keyboard": [
@@ -185,7 +185,7 @@ def get_main_keyboard():
     }
 
 
-# مدیریت پیام‌ها و دستورات ربات بله
+# مدیریت ورودی‌های ربات (هم پیام‌های متنی و هم دکمه‌های شیشه‌ای)
 def handle_updates():
     offset = 0
     while True:
@@ -205,6 +205,14 @@ def handle_updates():
                         name = msg["from"].get("first_name", "حاکم")
 
                         process_message(chat_id, name, text)
+
+                    elif "callback_query" in update:
+                        cq = update["callback_query"]
+                        chat_id = cq["message"]["chat"]["id"]
+                        data_call = cq["data"]
+                        name = cq["from"].get("first_name", "حاکم")
+
+                        process_callback(chat_id, name, data_call)
         except Exception as e:
             print(f"Polling error: {e}")
             time.sleep(5)
@@ -230,10 +238,7 @@ def process_message(chat_id, name, text):
 
     conn.close()
 
-    if text == "/start" or text == "منو":
-        send_main_menu(chat_id, name)
-
-    elif text == "🏰 وضعیت دربار":
+    if text == "/start" or text == "منو" or text == "🏰 وضعیت دربار":
         send_main_menu(chat_id, name)
 
     elif text == "🏭 ساخت کارخانه (100 سکه)":
@@ -321,91 +326,29 @@ def process_message(chat_id, name, text):
         market_text = (
             f"🛒 **بازار سیاه (محل داد و ستد با الماس)**\n\n"
             f"💎 الماس‌های شما: {diamonds} / 600\n\n"
-            "برای خرید هر آیتم، دستور زیر را ارسال کنید یا از دکمه‌های شیشه‌ای استفاده کنید (یا برای سادگی، با دستورات متنی خرید کنید):\n"
-            "• `/buy_coins` (خرید 50 سکه با 10 الماس)\n"
-            "• `/buy_meat` (خرید 20 گوشت با 15 الماس)\n"
-            "• `/buy_power` (افزایش 10 قدرت با 30 الماس)"
+            "برای خرید هر آیتم، از دکمه‌های شیشه‌ای زیر استفاده کنید:"
         )
-        send_message(chat_id, market_text, get_main_keyboard())
-
-    elif text == "/buy_coins":
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
-        )
-        diamonds = cursor.fetchone()[0]
-        if diamonds >= 10:
-            cursor.execute(
-                "UPDATE village_resources SET diamonds = diamonds - 10 WHERE chat_id = ?",
-                (chat_id,),
-            )
-            cursor.execute(
-                "UPDATE players SET coins = coins + 50 WHERE chat_id = ?", (chat_id,)
-            )
-            conn.commit()
-            send_message(
-                chat_id,
-                "✅ 50 سکه با موفقیت خریداری شد!",
-                get_main_keyboard(),
-            )
-        else:
-            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())
-        conn.close()
-
-    elif text == "/buy_meat":
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
-        )
-        diamonds = cursor.fetchone()[0]
-        if diamonds >= 15:
-            cursor.execute(
-                "UPDATE village_resources SET diamonds = diamonds - 15 WHERE chat_id = ?",
-                (chat_id,),
-            )
-            cursor.execute(
-                "UPDATE players SET meat = meat + 20 WHERE chat_id = ?", (chat_id,)
-            )
-            conn.commit()
-            send_message(
-                chat_id,
-                "✅ 20 گوشت با موفقیت از بازار سیاه خریداری شد!",
-                get_main_keyboard(),
-            )
-        else:
-            send_message(
-                chat_id,
-                "❌ الماس کافی نداری! (15 الماس نیاز است)",
-                get_main_keyboard(),
-            )
-        conn.close()
-
-    elif text == "/buy_power":
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
-        )
-        diamonds = cursor.fetchone()[0]
-        if diamonds >= 30:
-            cursor.execute(
-                "UPDATE village_resources SET diamonds = diamonds - 30 WHERE chat_id = ?",
-                (chat_id,),
-            )
-            cursor.execute(
-                "UPDATE players SET power = power + 10 WHERE chat_id = ?", (chat_id,),
-            )
-            conn.commit()
-            send_message(
-                chat_id,
-                "✅ تجهیزات جنگی خریداری شد! قدرت شما 10 واحد افزایش یافت.",
-                get_main_keyboard(),
-            )
-        else:
-            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())
-        conn.close()
+        market_keyboard = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "📦 خرید 50 سکه (10 الماس)",
+                        "callback_data": "buy_coins",
+                    },
+                    {
+                        "text": "🥩 خرید 20 گوشت (15 الماس)",
+                        "callback_data": "buy_meat",
+                    },
+                ],
+                [
+                    {
+                        "text": "⚔️ خرید قدرت جنگی (+10 قدرت، 30 الماس)",
+                        "callback_data": "buy_power",
+                    }
+                ],
+            ]
+        }
+        send_message(chat_id, market_text, market_keyboard)
 
     elif text == "⚔️ نبرد با بازیکنان (PvP)":
         conn = get_db()
@@ -425,25 +368,96 @@ def process_message(chat_id, name, text):
             )
             return
 
-        target_list_text = (
-            "🎯 **لیست حریفان برای حمله:**\nبرای حمله به هر بازیکن، دستور زیر را ارسال کنید:\n"
-        )
+        keyboard = []
         for t_id, t_name, t_terr, t_sold in targets:
-            target_list_text += (
-                f"• نام: {t_name} | قلمرو: {t_terr} | سرباز: {t_sold}\n"
-                f"  دستور حمله: `/attack_{t_id}`\n\n"
+            keyboard.append([
+                {
+                    "text": f"⚔️ حمله به {t_name} ({t_terr}) [سرباز: {t_sold}]",
+                    "callback_data": f"attack_{t_id}",
+                }
+            ])
+        
+        send_message(
+            chat_id,
+            "🎯 **لیست حریفان برای حمله:**\nروی دکمه‌ی حریف مورد نظر خود کلیک کنید:",
+            {"inline_keyboard": keyboard},
+        )
+
+    elif text == "🛡️ اتحادها":
+        send_message(
+            chat_id,
+            "🛡️ سیستم اتحادها و قبیله‌ها به زودی فعال خواهد شد تا با دوستانتان متحد شوید!",
+            get_main_keyboard(),
+        )
+
+    else:
+        send_message(
+            chat_id,
+            "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
+            get_main_keyboard(),
+        )
+
+
+def process_callback(chat_id, name, data):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    if data == "buy_coins":
+        cursor.execute(
+            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+        )
+        diamonds = cursor.fetchone()[0]
+        if diamonds >= 10:
+            cursor.execute(
+                "UPDATE village_resources SET diamonds = diamonds - 10 WHERE chat_id = ?",
+                (chat_id,),
             )
-        send_message(chat_id, target_list_text, get_main_keyboard())
+            cursor.execute(
+                "UPDATE players SET coins = coins + 50 WHERE chat_id = ?", (chat_id,)
+            )
+            conn.commit()
+            send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!")
+        else:
+            send_message(chat_id, "❌ الماس کافی نداری!")
 
-    elif text.startswith("/attack_"):
-        try:
-            target_id = int(text.split("_")[1])
-        except:
-            send_message(chat_id, "❌ فرمت حمله نامعتبر است.", get_main_keyboard())
-            return
+    elif data == "buy_meat":
+        cursor.execute(
+            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+        )
+        diamonds = cursor.fetchone()[0]
+        if diamonds >= 15:
+            cursor.execute(
+                "UPDATE village_resources SET diamonds = diamonds - 15 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            cursor.execute(
+                "UPDATE players SET meat = meat + 20 WHERE chat_id = ?", (chat_id,)
+            )
+            conn.commit()
+            send_message(chat_id, "✅ 20 گوشت با موفقیت از بازار سیاه خریداری شد!")
+        else:
+            send_message(chat_id, "❌ الماس کافی نداری! (15 الماس نیاز است)")
 
-        conn = get_db()
-        cursor = conn.cursor()
+    elif data == "buy_power":
+        cursor.execute(
+            "SELECT diamonds FROM village_resources WHERE chat_id = ?", (chat_id,)
+        )
+        diamonds = cursor.fetchone()[0]
+        if diamonds >= 30:
+            cursor.execute(
+                "UPDATE village_resources SET diamonds = diamonds - 30 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            cursor.execute(
+                "UPDATE players SET power = power + 10 WHERE chat_id = ?", (chat_id,)
+            )
+            conn.commit()
+            send_message(chat_id, "✅ تجهیزات جنگی خریداری شد! قدرت شما 10 واحد افزایش یافت.")
+        else:
+            send_message(chat_id, "❌ الماس کافی نداری!")
+
+    elif data.startswith("attack_"):
+        target_id = int(data.split("_")[1])
         cursor.execute(
             "SELECT name, power, soldiers, coins FROM players WHERE chat_id = ?",
             (chat_id,),
@@ -458,11 +472,7 @@ def process_message(chat_id, name, text):
 
         if not defender:
             conn.close()
-            send_message(
-                chat_id,
-                "❌ این بازیکن دیگر در دسترس نیست.",
-                get_main_keyboard(),
-            )
+            send_message(chat_id, "❌ این بازیکن دیگر در دسترس نیست.")
             return
 
         att_power = attacker[1] + (attacker[2] * 5)
@@ -482,12 +492,10 @@ def process_message(chat_id, name, text):
             send_message(
                 chat_id,
                 f"🎉 پیروزی بزرگ!\nشما به قلمرو **{defender[0]}** یورش بردید و با غلبه بر ارتش او، {loot} سکه غنیمت گرفتید!",
-                get_main_keyboard(),
             )
             send_message(
                 target_id,
                 f"⚠️ هشدار! حاکم **{attacker[0]}** به قلمرو شما حمله کرد و شما نبرد را باختید و {loot} سکه از دست دادید!",
-                get_main_keyboard(),
             )
         else:
             cursor.execute(
@@ -502,28 +510,13 @@ def process_message(chat_id, name, text):
             send_message(
                 chat_id,
                 f"💥 شکست تلخ!\nارتش شما در برابر مدافعان **{defender[0]}** شکست خورد و عقب‌نشینی کرد.",
-                get_main_keyboard(),
             )
             send_message(
                 target_id,
                 f"🛡️ دفاع موفق!\nحاکم **{attacker[0]}** به شما حمله کرد اما دلاوران شما مانع از نفوذ او شدند!",
-                get_main_keyboard(),
             )
-        conn.close()
 
-    elif text == "🛡️ اتحادها":
-        send_message(
-            chat_id,
-            "🛡️ سیستم اتحادها و قبیله‌ها به زودی فعال خواهد شد تا با دوستانتان متحد شوید!",
-            get_main_keyboard(),
-        )
-
-    else:
-        send_message(
-            chat_id,
-            "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
-            get_main_keyboard(),
-        )
+    conn.close()
 
 
 def send_main_menu(chat_id, name):
