@@ -507,38 +507,32 @@ def process_message(chat_id, name, text):
             send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!", get_main_keyboard())
         else:
             send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())
+else:
+        send_message(
+            chat_id,
+            "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
+            get_main_keyboard(),
+        )
 
-    elif data == "buy_meat":
+def process_callback(chat_id, name, data):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    if data == "buy_coins":
         diamonds = ensure_village_resources(cursor, chat_id)
-        if diamonds >= 15:
+        if diamonds >= 10:
             cursor.execute(
-                "UPDATE village_resources SET diamonds = diamonds - 15 WHERE chat_id = ?",
+                "UPDATE village_resources SET diamonds = diamonds - 10 WHERE chat_id = ?",
                 (chat_id,),
             )
             cursor.execute(
-                "UPDATE players SET meat = meat + 20 WHERE chat_id = ?",
+                "UPDATE players SET coins = coins + 50 WHERE chat_id = ?",
                 (chat_id,),
             )
             conn.commit()
-            send_message(chat_id, "✅ 20 گوشت با موفقیت از بازار سیاه خریداری شد!", get_main_keyboard())
+            send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!", get_main_keyboard())
         else:
-            send_message(chat_id, "❌ الماس کافی نداری! (15 الماس نیاز است)", get_main_keyboard())
-
-    elif data == "create_clan":
-        clan_name = f"اتحاد {name}"
-        cursor.execute("INSERT INTO clans (name, leader_id) VALUES (?, ?)", (clan_name, chat_id))
-        clan_id = cursor.lastrowid
-        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (clan_id, chat_id))
-        conn.commit()
-        send_message(chat_id, f"🏰 اتحاد «{clan_name}» با موفقیت تأسیس شد!", get_main_keyboard())
-
-    elif data.startswith("join_clan_"):
-        c_id = int(data.split("_")[2])
-        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (c_id, chat_id))
-        conn.commit()
-        send_message(chat_id, "🛡️ با موفقیت به اتحاد مورد نظر پیوستید!", get_main_keyboard())
-
-    elif data == "leave_clan":
+            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())    elif data == "leave_clan":
         cursor.execute("UPDATE players SET clan_id = 0 WHERE chat_id = ?", (chat_id,))
         conn.commit()
         send_message(chat_id, "🚪 شما اتحاد خود را ترک کردید.", get_main_keyboard())
