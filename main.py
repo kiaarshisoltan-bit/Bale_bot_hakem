@@ -467,28 +467,14 @@ def process_message(chat_id, name, text):
             
             cursor.execute("SELECT name FROM players WHERE clan_id = ?", (p_clan,))
             members = cursor.fetchall()
-            conn.close()
+else:
+    send_message(
+        chat_id,
+        "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
+        get_main_keyboard(),
+    )
 
-            member_list = ", ".join([m[0] for m in members])
-            clan_text = (
-                f"🛡️ اطلاعات اتحاد شما:\n"
-                f"🏷 نام اتحاد: {clan_name}\n"
-                f"👥 اعضای اتحاد: {member_list}\n\n"
-                "برای ترک اتحاد می‌توانید از دکمه زیر استفاده کنید:"
-            )
-            send_message(
-                chat_id,
-                clan_text,
-                {"inline_keyboard": [[{"text": "🚪 ترک اتحاد", "callback_data": "leave_clan"}]]}
-            )
-
-    else:
-        send_message(
-            chat_id,
-            "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
-            get_main_keyboard(),
-        )
-        def process_callback(chat_id, name, data):
+def process_callback(chat_id, name, data):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -506,19 +492,7 @@ def process_message(chat_id, name, text):
             conn.commit()
             send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!", get_main_keyboard())
         else:
-            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())
-else:
-        send_message(
-            chat_id,
-            "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
-            get_main_keyboard(),
-        )
-
-def process_callback(chat_id, name, data):
-    conn = get_db()
-    cursor = conn.cursor()
-
-    if data == "buy_coins":
+            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())    if data == "buy_coins":
         diamonds = ensure_village_resources(cursor, chat_id)
         if diamonds >= 10:
             cursor.execute(
