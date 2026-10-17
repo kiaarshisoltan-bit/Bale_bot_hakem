@@ -306,19 +306,23 @@ def process_message(chat_id, name, text):
             return
 
         enemy_id, enemy_name, enemy_territory, enemy_soldiers, enemy_power = enemy
+        
+        # متن مشخصات کامل کاربر رندوم
         text_show = (
-            "🎯 هدفی برای حمله پیدا شد!\n\n"
+            "🎯 یک هدف برای نبرد شناسایی شد!\n\n"
             f"👑 نام حاکم: {enemy_name}\n"
-            f"🏰 قلمرو: {enemy_territory}\n"
-            f"🪖 سربازان: {enemy_soldiers}\n"
-            f"⚔️ قدرت پایه: {enemy_power}\n\n"
-            "اگر آماده‌ای، از دکمه زیر برای حمله استفاده کن:"
+            f"🏰 نام قلمرو: {enemy_territory}\n"
+            f"🪖 تعداد سربازان: {enemy_soldiers}\n"
+            f"⚔️ قدرت رزمی: {enemy_power}\n\n"
+            "برای یورش به این قلمرو از دکمه زیر استفاده کن:"
         )
+        
+        # فقط یک دکمه شیشه‌ای تمیز بدون لیست اضافی
         keyboard = {
             "inline_keyboard": [
                 [
                     {
-                        "text": f"⚔️ حمله به قلمرو {enemy_territory}",
+                        "text": f"⚔️ نبرد با {enemy_territory} ({enemy_name})",
                         "callback_data": f"attack_random_{enemy_id}",
                     }
                 ]
