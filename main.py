@@ -473,6 +473,38 @@ else:
         "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
         get_main_keyboard(),
     )
+else:
+            cursor.execute("SELECT name FROM clans WHERE id = ?", (p_clan,))
+            clan_res = cursor.fetchone()
+            clan_name = clan_res[0] if clan_res else "اتحاد ناشناخته"
+            
+            cursor.execute("SELECT name FROM players WHERE clan_id = ?", (p_clan,))
+            members = cursor.fetchall()
+            conn.close()
+
+            member_list = ", ".join([m[0] for m in members])
+            clan_text = (
+                f"🛡️ اطلاعات اتحاد شما:\n"
+                f"🏷 نام اتحاد: {clan_name}\n"
+                f"👥 اعضای اتحاد: {member_list}\n\n"
+                "برای ترک اتحاد می‌توانید از دکمه زیر استفاده کنید:"
+            )
+            send_message(
+                chat_id,
+                clan_text,
+                {"inline_keyboard": [[{"text": "🚪 ترک اتحاد", "callback_data": "leave_clan"}]]}
+            )
+
+    else:
+        send_message(
+            chat_id,
+            "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
+            get_main_keyboard(),
+        )
+
+# ---------------------------------------------------------
+# از اینجا به بعد تابع process_callback شروع می‌شود
+# ---------------------------------------------------------
 
 def process_callback(chat_id, name, data):
     conn = get_db()
@@ -492,21 +524,25 @@ def process_callback(chat_id, name, data):
             conn.commit()
             send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!", get_main_keyboard())
         else:
-            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())    if data == "buy_coins":
+            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())
+
+    elif data == "buy_meat":
         diamonds = ensure_village_resources(cursor, chat_id)
-        if diamonds >= 10:
+        if diamonds >= 15:
             cursor.execute(
-                "UPDATE village_resources SET diamonds = diamonds - 10 WHERE chat_id = ?",
+                "UPDATE village_resources SET diamonds = diamonds - 15 WHERE chat_id = ?",
                 (chat_id,),
             )
             cursor.execute(
-                "UPDATE players SET coins = coins + 50 WHERE chat_id = ?",
+                "UPDATE players SET meat = meat + 20 WHERE chat_id = ?",
                 (chat_id,),
             )
             conn.commit()
-            send_message(chat_id, "✅ 50 سکه با موفقیت خریداری شد!", get_main_keyboard())
+            send_message(chat_id, "✅ 20 گوشت با موفقیت خریداری شد!", get_main_keyboard())
         else:
-            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())    elif data == "leave_clan":
+            send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())
+
+    elif data == "leave_clan":
         cursor.execute("UPDATE players SET clan_id = 0 WHERE chat_id = ?", (chat_id,))
         conn.commit()
         send_message(chat_id, "🚪 شما اتحاد خود را ترک کردید.", get_main_keyboard())
@@ -548,6 +584,25 @@ def process_callback(chat_id, name, data):
             send_message(
                 chat_id,
                 f"🎉 پیروزی بزرگ!\nشما به قلمرو {defender[0]} یورش بردید و با غلبه بر ارتش او، {loot} سکه غنیمت گرفتید!",
+                get_main_keyboard(),
+            )
+        else:
+            cursor.execute(
+                "UPDATE players SET losses = losses + 1 WHERE chat_id = ?",
+                (chat_id,),
+            )
+            cursor.execute(
+                "UPDATE players SET wins = wins + 1 WHERE chat_id = ?",
+                (target_id,),
+            )
+            conn.commit()
+            send_message(
+                chat_id,
+                f"💥 شکست تلخ!\nارتش {defender[0]} قوی‌تر بود و مجبور به عقب‌نشینی شدی.",
+                get_main_keyboard(),
+            )
+
+    conn.close()
                 get_main_keyboard(),
             )
             send_message(
