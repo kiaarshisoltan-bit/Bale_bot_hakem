@@ -294,35 +294,47 @@ def process_message(chat_id, name, text):
     elif text == "⚔️ نبرد با بازیکنان (PvP)":
         conn = get_db()
         cursor = conn.cursor()
+        # انتخاب یک بازیکن به صورت کاملاً رندوم به جز خود کاربر
         cursor.execute(
-            "SELECT chat_id, name, territory, soldiers, power FROM players WHERE chat_id != ? ORDER BY RANDOM() LIMIT 1",
+            "SELECT chat_id, name, territory, soldiers, power, clan_id FROM players WHERE chat_id != ? ORDER BY RANDOM() LIMIT 1",
             (chat_id,),
         )
         enemy = cursor.fetchone()
-        conn.close()
 
         if not enemy:
+            conn.close()
             send_message(chat_id, "⚠️ هنوز هیچ بازیکن دیگری در ربات ثبت‌نام نکرده است!", get_main_keyboard())
             return
 
-        enemy_id, enemy_name, enemy_territory, enemy_soldiers, enemy_power = enemy
-        
-        # متن مشخصات کامل کاربر رندوم
+        enemy_id, enemy_name, enemy_territory, enemy_soldiers, enemy_power, enemy_clan_id = enemy
+
+        # پیدا کردن نام قبیله/اتحاد حریف
+        clan_name = "بدون اتحاد"
+        if enemy_clan_id > 0:
+            cursor.execute("SELECT name FROM clans WHERE id = ?", (enemy_clan_id,))
+            c_res = cursor.fetchone()
+            if c_res:
+                clan_name = c_res[0]
+
+        conn.close()
+
+        # متن مشخصات کامل کاربر رندوم همراه با نام قبیله
         text_show = (
             "🎯 یک هدف برای نبرد شناسایی شد!\n\n"
             f"👑 نام حاکم: {enemy_name}\n"
             f"🏰 نام قلمرو: {enemy_territory}\n"
+            f"🛡️ نام قبیله: {clan_name}\n"
             f"🪖 تعداد سربازان: {enemy_soldiers}\n"
             f"⚔️ قدرت رزمی: {enemy_power}\n\n"
             "برای یورش به این قلمرو از دکمه زیر استفاده کن:"
         )
         
-        # فقط یک دکمه شیشه‌ای تمیز بدون لیست اضافی
+        # فقط یک دکمه شیشه‌ای که نام قبیله و قلمرو روی آن درج شده است (بدون هیچ لیستی)
         keyboard = {
             "inline_keyboard": [
                 [
                     {
-                        "text": f"⚔️ نبرد با {enemy_territory} ({enemy_name})",
+                        "text": f"⚔️ نبرد با {clan_name} ({enemy_territory})",
                         "callback_data": f"attack_random_{enemy_id}",
                     }
                 ]
