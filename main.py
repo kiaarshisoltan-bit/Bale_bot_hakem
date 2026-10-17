@@ -184,7 +184,6 @@ def get_main_keyboard():
     }
 
 
-# مدیریت ورودی‌های ربات
 def handle_updates():
     offset = 0
     while True:
@@ -230,9 +229,7 @@ def ensure_village_resources(cursor, chat_id):
         )
         return 600
     return res[0]
-
-
-def process_message(chat_id, name, text):
+    def process_message(chat_id, name, text):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -249,7 +246,7 @@ def process_message(chat_id, name, text):
             (chat_id,),
         )
         conn.commit()
-        
+
     # وضعیت قلمرو کاربر
     cursor.execute(
         "SELECT territory FROM players WHERE chat_id = ?",
@@ -467,19 +464,6 @@ def process_message(chat_id, name, text):
             
             cursor.execute("SELECT name FROM players WHERE clan_id = ?", (p_clan,))
             members = cursor.fetchall()
-else:
-    send_message(
-        chat_id,
-        "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
-        get_main_keyboard(),
-    )
-else:
-            cursor.execute("SELECT name FROM clans WHERE id = ?", (p_clan,))
-            clan_res = cursor.fetchone()
-            clan_name = clan_res[0] if clan_res else "اتحاد ناشناخته"
-            
-            cursor.execute("SELECT name FROM players WHERE clan_id = ?", (p_clan,))
-            members = cursor.fetchall()
             conn.close()
 
             member_list = ", ".join([m[0] for m in members])
@@ -501,12 +485,7 @@ else:
             "دستور نامعتبر! از دکمه‌های پایین صفحه استفاده کنید:",
             get_main_keyboard(),
         )
-
-# ---------------------------------------------------------
-# از اینجا به بعد تابع process_callback شروع می‌شود
-# ---------------------------------------------------------
-
-def process_callback(chat_id, name, data):
+        def process_callback(chat_id, name, data):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -541,6 +520,20 @@ def process_callback(chat_id, name, data):
             send_message(chat_id, "✅ 20 گوشت با موفقیت خریداری شد!", get_main_keyboard())
         else:
             send_message(chat_id, "❌ الماس کافی نداری!", get_main_keyboard())
+
+    elif data == "create_clan":
+        clan_name = f"اتحاد {name}"
+        cursor.execute("INSERT INTO clans (name, leader_id) VALUES (?, ?)", (clan_name, chat_id))
+        clan_id = cursor.lastrowid
+        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (clan_id, chat_id))
+        conn.commit()
+        send_message(chat_id, f"🏰 اتحاد «{clan_name}» با موفقیت تأسیس شد!", get_main_keyboard())
+
+    elif data.startswith("join_clan_"):
+        c_id = int(data.split("_")[2])
+        cursor.execute("UPDATE players SET clan_id = ? WHERE chat_id = ?", (c_id, chat_id))
+        conn.commit()
+        send_message(chat_id, "🛡️ با موفقیت به اتحاد مورد نظر پیوستید!", get_main_keyboard())
 
     elif data == "leave_clan":
         cursor.execute("UPDATE players SET clan_id = 0 WHERE chat_id = ?", (chat_id,))
@@ -586,25 +579,6 @@ def process_callback(chat_id, name, data):
                 f"🎉 پیروزی بزرگ!\nشما به قلمرو {defender[0]} یورش بردید و با غلبه بر ارتش او، {loot} سکه غنیمت گرفتید!",
                 get_main_keyboard(),
             )
-        else:
-            cursor.execute(
-                "UPDATE players SET losses = losses + 1 WHERE chat_id = ?",
-                (chat_id,),
-            )
-            cursor.execute(
-                "UPDATE players SET wins = wins + 1 WHERE chat_id = ?",
-                (target_id,),
-            )
-            conn.commit()
-            send_message(
-                chat_id,
-                f"💥 شکست تلخ!\nارتش {defender[0]} قوی‌تر بود و مجبور به عقب‌نشینی شدی.",
-                get_main_keyboard(),
-            )
-
-    conn.close()
-                get_main_keyboard(),
-            )
             send_message(
                 target_id,
                 f"⚠️ هشدار! حاکم {attacker[0]} به قلمرو شما حمله کرد و شما نبرد را باختید و {loot} سکه از دست دادید!",
@@ -622,7 +596,7 @@ def process_callback(chat_id, name, data):
             conn.commit()
             send_message(
                 chat_id,
-                f"💥 شکست تلخ!\nارتش شما در برابر مدافعان {defender[0]} شکست خورد و عقب‌نشینی کرد.",
+                f"💥 شکست تلخ!\nارتش {defender[0]} قوی‌تر بود و مجبور به عقب‌نشینی شدی.",
                 get_main_keyboard(),
             )
             send_message(
@@ -708,9 +682,7 @@ def process_callback(chat_id, name, data):
             )
 
     conn.close()
-
-
-def send_main_menu(chat_id, name):
+    def send_main_menu(chat_id, name):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(
